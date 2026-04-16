@@ -5,7 +5,7 @@ mod mover;
 mod sound;
 mod state;
 mod timer;
-pub mod watcher;
+mod watcher;
 
 use state::create_app_state;
 
