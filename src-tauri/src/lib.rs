@@ -1,5 +1,6 @@
 mod config;
 mod events;
+mod hotkeys;
 mod logger;
 mod mover;
 mod sound;
