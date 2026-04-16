@@ -2,6 +2,7 @@ mod config;
 mod events;
 mod logger;
 mod mover;
+mod sound;
 mod state;
 mod timer;
 pub mod watcher;
