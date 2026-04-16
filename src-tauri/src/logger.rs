@@ -1,0 +1,204 @@
+use chrono::Local;
+use std::fs;
+use std::io::Write;
+use std::path::PathBuf;
+
+use crate::events::{LogCategory, LogEntryPayload, LogLevel};
+
+pub struct AppLogger {
+    history: Vec<LogEntryPayload>,
+    display_buffer: Vec<LogEntryPayload>,
+    log_dir: Option<PathBuf>,
+    log_enabled: bool,
+}
+
+impl AppLogger {
+    pub fn new(videos_folder: &str, log_enabled: bool) -> Self {
+        let log_dir = if !videos_folder.is_empty() {
+            let dir = PathBuf::from(videos_folder).join("logs");
+            if let Err(e) = fs::create_dir_all(&dir) {
+                eprintln!("Failed to create log dir: {}", e);
+                None
+            } else {
+                Some(dir)
+            }
+        } else {
+            None
+        };
+
+        Self {
+            history: Vec::new(),
+            display_buffer: Vec::new(),
+            log_dir,
+            log_enabled,
+        }
+    }
+
+    pub fn log(
+        &mut self,
+        level: LogLevel,
+        message: String,
+        category: LogCategory,
+    ) -> LogEntryPayload {
+        let timestamp = Local::now().format("%I:%M:%S %p").to_string();
+        let entry = LogEntryPayload {
+            timestamp,
+            level,
+            message,
+            category,
+        };
+        self.history.push(entry.clone());
+        self.display_buffer.push(entry.clone());
+        entry
+    }
+
+    pub fn write_to_file(&self, line: &str) {
+        if !self.log_enabled {
+            return;
+        }
+        let Some(ref dir) = self.log_dir else {
+            return;
+        };
+        let filename = format!("ObsMoveLog {}.txt", Local::now().format("%Y-%m-%d"));
+        let path = dir.join(filename);
+        match fs::OpenOptions::new().create(true).append(true).open(&path) {
+            Ok(mut file) => {
+                if let Err(e) = writeln!(file, "{}", line) {
+                    eprintln!("Failed to write to log file: {}", e);
+                }
+            }
+            Err(e) => {
+                eprintln!("Failed to open log file: {}", e);
+            }
+        }
+    }
+
+    pub fn wipe_display(&mut self) {
+        self.display_buffer.clear();
+    }
+
+    /// Rebuilds display_buffer from history, filtering out HotkeyPressed entries
+    /// and entries whose message contains "No current_file".
+    pub fn restore_display(&mut self) -> Vec<LogEntryPayload> {
+        self.display_buffer = self
+            .history
+            .iter()
+            .filter(|entry| {
+                !matches!(entry.category, LogCategory::HotkeyPressed)
+                    && !entry.message.contains("No current_file")
+            })
+            .cloned()
+            .collect();
+        self.display_buffer.clone()
+    }
+
+    pub fn display_entries(&self) -> &[LogEntryPayload] {
+        &self.display_buffer
+    }
+
+    pub fn history(&self) -> &[LogEntryPayload] {
+        &self.history
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_logger() -> AppLogger {
+        AppLogger::new("", false)
+    }
+
+    #[test]
+    fn test_log_adds_to_history_and_display() {
+        let mut logger = make_logger();
+        logger.log(LogLevel::Info, "hello".to_string(), LogCategory::System);
+
+        assert_eq!(logger.history().len(), 1);
+        assert_eq!(logger.display_entries().len(), 1);
+        assert_eq!(logger.history()[0].message, "hello");
+        assert_eq!(logger.display_entries()[0].message, "hello");
+    }
+
+    #[test]
+    fn test_wipe_clears_display_but_keeps_history() {
+        let mut logger = make_logger();
+        logger.log(LogLevel::Info, "first".to_string(), LogCategory::System);
+        logger.log(LogLevel::Info, "second".to_string(), LogCategory::System);
+
+        logger.wipe_display();
+
+        assert_eq!(logger.history().len(), 2);
+        assert_eq!(logger.display_entries().len(), 0);
+    }
+
+    #[test]
+    fn test_restore_filters_noise() {
+        let mut logger = make_logger();
+
+        // Should survive restore
+        logger.log(LogLevel::Info, "file created".to_string(), LogCategory::FileCreated);
+
+        // Should be filtered: HotkeyPressed
+        logger.log(LogLevel::Info, "hotkey G1".to_string(), LogCategory::HotkeyPressed);
+
+        // Should be filtered: "No current_file" system message
+        logger.log(
+            LogLevel::Warning,
+            "No current_file set".to_string(),
+            LogCategory::System,
+        );
+
+        // Should survive restore
+        logger.log(LogLevel::Success, "file moved".to_string(), LogCategory::FileMoved);
+
+        logger.wipe_display();
+        assert_eq!(logger.display_entries().len(), 0);
+
+        let restored = logger.restore_display();
+
+        assert_eq!(restored.len(), 2);
+        assert_eq!(restored[0].message, "file created");
+        assert_eq!(restored[1].message, "file moved");
+    }
+
+    #[test]
+    fn test_write_to_file_with_logging_disabled() {
+        // log_enabled = false, no log_dir — must not panic
+        let logger = AppLogger::new("", false);
+        logger.write_to_file("test line"); // should be a no-op
+    }
+
+    #[test]
+    fn test_write_to_file_creates_daily_log() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let videos_folder = tmp.path().to_str().unwrap();
+
+        let mut logger = AppLogger {
+            history: Vec::new(),
+            display_buffer: Vec::new(),
+            log_dir: Some(PathBuf::from(videos_folder).join("logs")),
+            log_enabled: true,
+        };
+
+        // Ensure the log dir exists
+        fs::create_dir_all(logger.log_dir.as_ref().unwrap()).unwrap();
+
+        let test_line = "test log entry";
+        logger.write_to_file(test_line);
+
+        let expected_filename = format!("ObsMoveLog {}.txt", Local::now().format("%Y-%m-%d"));
+        let log_path = logger.log_dir.as_ref().unwrap().join(&expected_filename);
+
+        assert!(log_path.exists(), "log file should exist at {:?}", log_path);
+
+        let contents = fs::read_to_string(&log_path).unwrap();
+        assert!(
+            contents.contains(test_line),
+            "log file should contain the written line"
+        );
+
+        // suppress unused warning — logger is intentionally used above
+        let _ = logger.history();
+    }
+}
