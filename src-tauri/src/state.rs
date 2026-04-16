@@ -1,7 +1,11 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use tokio::sync::mpsc;
 
-use crate::events::LogEntryPayload;
+use crate::config::AppConfig;
+use crate::logger::AppLogger;
+use crate::timer::TimerCommand;
+use crate::watcher::WatcherCommand;
 
 #[derive(Debug, Clone)]
 pub struct CurrentFile {
@@ -10,42 +14,24 @@ pub struct CurrentFile {
     pub renamed: bool,
 }
 
-#[derive(Debug, Clone)]
-pub enum WatcherStatus {
-    Running,
-    Stopped,
-    Error(String),
-}
-
-#[derive(Debug, Clone)]
-pub enum ObsWsStatus {
-    Disconnected,
-    Connecting,
-    Connected,
-    Reconnecting { attempt: u32 },
-    FailedOver,
-}
-
-#[derive(Debug)]
 pub struct AppStateInner {
     pub current_file: Option<CurrentFile>,
     pub bind_chosen: Option<String>,
-    pub log_history: Vec<LogEntryPayload>,
-    pub watcher_status: WatcherStatus,
+    pub config: AppConfig,
+    pub logger: AppLogger,
     pub watcher_restart_count: u32,
-    pub obs_ws_status: ObsWsStatus,
     pub timer_running: bool,
 }
 
 impl AppStateInner {
-    pub fn new() -> Self {
+    pub fn new(config: AppConfig) -> Self {
+        let logger = AppLogger::new(&config.videos_folder, config.log_file_enabled);
         Self {
             current_file: None,
             bind_chosen: None,
-            log_history: Vec::new(),
-            watcher_status: WatcherStatus::Stopped,
+            config,
+            logger,
             watcher_restart_count: 0,
-            obs_ws_status: ObsWsStatus::Disconnected,
             timer_running: false,
         }
     }
@@ -53,6 +39,8 @@ impl AppStateInner {
 
 pub type AppState = Arc<Mutex<AppStateInner>>;
 
-pub fn create_app_state() -> AppState {
-    Arc::new(Mutex::new(AppStateInner::new()))
+/// Holds the tokio channel senders for background tasks.
+pub struct ChannelState {
+    pub timer_tx: mpsc::Sender<TimerCommand>,
+    pub watcher_tx: mpsc::Sender<WatcherCommand>,
 }
