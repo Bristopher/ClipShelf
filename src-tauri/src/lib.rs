@@ -2,6 +2,7 @@ mod config;
 mod events;
 mod logger;
 mod state;
+mod timer;
 
 use state::create_app_state;
 
