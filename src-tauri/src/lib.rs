@@ -3,6 +3,7 @@ mod events;
 mod hotkeys;
 mod logger;
 mod mover;
+mod obs_ws;
 mod sound;
 mod state;
 mod timer;
