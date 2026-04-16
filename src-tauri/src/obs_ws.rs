@@ -178,7 +178,7 @@ async fn connect_and_run(
                         let msg_text = serde_json::to_string(&payload)
                             .map_err(|e| format!("serialize error: {e}"))?;
                         write
-                            .send(Message::Text(msg_text))
+                            .send(Message::Text(msg_text.into()))
                             .await
                             .map_err(|e| format!("send error: {e}"))?;
                     }

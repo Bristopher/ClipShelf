@@ -7,6 +7,7 @@ mod obs_ws;
 mod sound;
 mod state;
 mod timer;
+mod tray;
 mod watcher;
 
 use state::create_app_state;
