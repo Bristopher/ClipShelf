@@ -1,8 +1,10 @@
 mod config;
 mod events;
 mod logger;
+mod mover;
 mod state;
 mod timer;
+pub mod watcher;
 
 use state::create_app_state;
 
