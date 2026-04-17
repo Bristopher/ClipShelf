@@ -15,7 +15,7 @@ pub enum TimerCommand {
 pub fn spawn_timer(app_handle: AppHandle) -> mpsc::Sender<TimerCommand> {
     let (tx, mut rx) = mpsc::channel::<TimerCommand>(32);
 
-    tokio::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         let mut total_secs: u32 = 70;
         let mut remaining: u32 = 0;
         let mut running = false;

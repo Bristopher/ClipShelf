@@ -5,7 +5,7 @@
   "identifier": "com.cbuzi.gkey-mover-v2",
   "build": {
     "beforeDevCommand": "pnpm dev",
-    "devUrl": "http://localhost:1420",
+    "devUrl": "http://127.0.0.1:1499",
     "beforeBuildCommand": "pnpm build",
     "frontendDist": "../dist"
   },

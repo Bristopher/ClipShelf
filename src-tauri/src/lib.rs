@@ -65,7 +65,7 @@ pub fn run() {
             if !config.videos_folder.is_empty() {
                 let path = PathBuf::from(&config.videos_folder);
                 let watcher_tx_start = watcher_tx.clone();
-                tokio::spawn(async move {
+                tauri::async_runtime::spawn(async move {
                     let _ = watcher_tx_start
                         .send(WatcherCommand::Start { path })
                         .await;
@@ -78,7 +78,7 @@ pub fn run() {
                 let state = app_state.clone();
                 let timer_tx = timer_tx.clone();
 
-                tokio::spawn(async move {
+                tauri::async_runtime::spawn(async move {
                     while let Some(event) = watcher_rx.recv().await {
                         match event {
                             WatcherEvent::FileCreated { path } => {
@@ -162,7 +162,7 @@ pub fn run() {
 
                 match hotkeys::spawn_hotkey_listener(bindings) {
                     Ok(mut hotkey_rx) => {
-                        tokio::spawn(async move {
+                        tauri::async_runtime::spawn(async move {
                             while let Some(action) = hotkey_rx.recv().await {
                                 match action {
                                     HotkeyAction::MoveG1 => {
@@ -205,12 +205,12 @@ pub fn run() {
 
                 // Send initial connect command
                 let obs_cmd_tx_clone = obs_cmd_tx.clone();
-                tokio::spawn(async move {
+                tauri::async_runtime::spawn(async move {
                     let _ = obs_cmd_tx_clone.send(ObsWsCommand::Connect).await;
                 });
 
                 // Handle OBS events
-                tokio::spawn(async move {
+                tauri::async_runtime::spawn(async move {
                     while let Some(event) = obs_event_rx.recv().await {
                         match event {
                             ObsWsEvent::Connected => {

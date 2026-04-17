@@ -2,6 +2,7 @@ use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watche
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use tauri;
 use tokio::sync::mpsc;
 
 // ---------------------------------------------------------------------------
@@ -32,7 +33,7 @@ pub fn spawn_watcher() -> (mpsc::Sender<WatcherCommand>, mpsc::Receiver<WatcherE
     let (evt_tx, evt_rx) = mpsc::channel::<WatcherEvent>(64);
 
     let cmd_tx_clone = cmd_tx.clone();
-    tokio::spawn(watcher_actor(cmd_rx, cmd_tx_clone, evt_tx));
+    tauri::async_runtime::spawn(watcher_actor(cmd_rx, cmd_tx_clone, evt_tx));
 
     (cmd_tx, evt_rx)
 }
@@ -61,7 +62,7 @@ async fn watcher_actor(
     // the notify backend stops delivering events.
     {
         let cmd_tx_sleep = cmd_tx.clone();
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             let mut last_tick = Instant::now();
             loop {
                 tokio::time::sleep(Duration::from_secs(1)).await;

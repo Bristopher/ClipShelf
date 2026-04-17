@@ -3,6 +3,7 @@ use futures_util::{SinkExt, StreamExt};
 use sha2::{Digest, Sha256};
 use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
+use tauri;
 
 #[derive(Debug, Clone)]
 pub enum ObsWsEvent {
@@ -43,7 +44,7 @@ pub fn spawn_obs_ws(
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<ObsWsCommand>(16);
     let (event_tx, event_rx) = mpsc::channel::<ObsWsEvent>(64);
 
-    tokio::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         while let Some(cmd) = cmd_rx.recv().await {
             match cmd {
                 ObsWsCommand::Connect => {

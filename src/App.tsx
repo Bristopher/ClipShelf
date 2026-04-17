@@ -1,50 +1,48 @@
-import { useState } from "react";
-import reactLogo from "./assets/react.svg";
-import { invoke } from "@tauri-apps/api/core";
-import "./App.css";
+import { useEffect, useState } from "react";
+import { getConfig } from "./lib/commands";
+import type { AppConfig } from "./types";
 
 function App() {
-  const [greetMsg, setGreetMsg] = useState("");
-  const [name, setName] = useState("");
+  const [config, setConfig] = useState<AppConfig | null>(null);
 
-  async function greet() {
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    setGreetMsg(await invoke("greet", { name }));
+  useEffect(() => {
+    getConfig().then(setConfig).catch(console.error);
+  }, []);
+
+  if (!config) {
+    return (
+      <div className="flex h-screen items-center justify-center">
+        <p className="text-muted-foreground">Loading...</p>
+      </div>
+    );
   }
 
   return (
-    <main className="container">
-      <h1>Welcome to Tauri + React</h1>
+    <div className="flex h-screen">
+      {/* Sidebar placeholder */}
+      <aside className="w-20 border-r border-border flex flex-col gap-2 p-2">
+        <div className="text-xs text-muted-foreground text-center">G-Keys</div>
+      </aside>
 
-      <div className="row">
-        <a href="https://vite.dev" target="_blank">
-          <img src="/vite.svg" className="logo vite" alt="Vite logo" />
-        </a>
-        <a href="https://tauri.app" target="_blank">
-          <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
+      {/* Main content */}
+      <main className="flex-1 flex flex-col">
+        <div className="flex-1 p-2">
+          <p className="text-sm text-muted-foreground">Event log will go here</p>
+        </div>
+        <div className="border-t border-border p-2 text-xs text-muted-foreground">
+          Bottom bar
+        </div>
+      </main>
+
+      {/* Timer placeholder */}
+      <div className="w-24 border-l border-border flex items-center justify-center">
+        <span className="text-2xl font-bold font-mono">
+          {config.timer_enabled
+            ? `${String(Math.floor(config.timer_duration_ms / 60000)).padStart(2, "0")}:${String(Math.floor((config.timer_duration_ms % 60000) / 1000)).padStart(2, "0")}`
+            : "--:--"}
+        </span>
       </div>
-      <p>Click on the Tauri, Vite, and React logos to learn more.</p>
-
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          greet();
-        }}
-      >
-        <input
-          id="greet-input"
-          onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Enter a name..."
-        />
-        <button type="submit">Greet</button>
-      </form>
-      <p>{greetMsg}</p>
-    </main>
+    </div>
   );
 }
 
