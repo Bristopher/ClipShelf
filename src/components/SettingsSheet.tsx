@@ -85,6 +85,13 @@ export function SettingsSheet({
                 className="w-full h-1.5 rounded-full appearance-none cursor-pointer bg-secondary accent-primary"
               />
             </div>
+            <div className="flex items-center justify-between">
+              <Label className="text-xs">Full opacity on hover</Label>
+              <Switch
+                checked={config.hover_full_opacity}
+                onCheckedChange={(v) => update({ hover_full_opacity: v })}
+              />
+            </div>
           </section>
 
           <Separator />

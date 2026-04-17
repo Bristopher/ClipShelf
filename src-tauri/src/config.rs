@@ -29,6 +29,7 @@ fn default_obs_websocket_password() -> String { "".to_string() }
 fn default_shadowplay_folder() -> Option<String> { None }
 fn default_prompt_capture_software() -> bool { false }
 fn default_window_opacity() -> f64 { 1.0 }
+fn default_hover_full_opacity() -> bool { true }
 
 // --- AppConfig struct ---
 
@@ -111,6 +112,9 @@ pub struct AppConfig {
 
     #[serde(default = "default_window_opacity")]
     pub window_opacity: f64,
+
+    #[serde(default = "default_hover_full_opacity")]
+    pub hover_full_opacity: bool,
 }
 
 impl Default for AppConfig {
@@ -142,6 +146,7 @@ impl Default for AppConfig {
             shadowplay_folder: default_shadowplay_folder(),
             prompt_capture_software: default_prompt_capture_software(),
             window_opacity: default_window_opacity(),
+            hover_full_opacity: default_hover_full_opacity(),
         }
     }
 }

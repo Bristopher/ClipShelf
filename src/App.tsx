@@ -65,6 +65,19 @@ function App() {
     }
   }, [config?.window_opacity]);
 
+  // Hover-to-full-opacity
+  const handleMouseEnter = useCallback(() => {
+    if (config?.hover_full_opacity && config.window_opacity < 1) {
+      setWindowOpacity(1).catch(console.error);
+    }
+  }, [config?.hover_full_opacity, config?.window_opacity]);
+
+  const handleMouseLeave = useCallback(() => {
+    if (config?.hover_full_opacity && config.window_opacity < 1) {
+      setWindowOpacity(config.window_opacity).catch(console.error);
+    }
+  }, [config?.hover_full_opacity, config?.window_opacity]);
+
   const initialSecs = config ? Math.floor(config.timer_duration_ms / 1000) : 70;
   const timer = useTimer(initialSecs);
 
@@ -77,7 +90,11 @@ function App() {
   }
 
   return (
-    <div className="flex flex-col h-screen">
+    <div
+      className="flex flex-col h-screen"
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+    >
       <TitleBar />
       <div className="flex flex-1 min-h-0">
         <Sidebar onSettingsClick={() => setSettingsOpen(true)} />

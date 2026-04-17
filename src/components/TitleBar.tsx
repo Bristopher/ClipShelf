@@ -4,18 +4,19 @@ import { Minus, Square, X } from "lucide-react";
 const appWindow = getCurrentWindow();
 
 export function TitleBar() {
+  const startDrag = (e: React.MouseEvent) => {
+    // Only drag from the bar itself, not from buttons
+    if ((e.target as HTMLElement).closest("button")) return;
+    appWindow.startDragging();
+  };
+
   return (
     <div
-      data-tauri-drag-region
-      className="h-7 flex items-center justify-between border-b border-border select-none shrink-0"
-      style={{ backgroundColor: "hsl(240 6% 12%)" }}
+      onMouseDown={startDrag}
+      className="h-7 flex items-center justify-between bg-secondary/80 border-b border-border select-none shrink-0 cursor-default"
     >
-      <div data-tauri-drag-region className="flex items-center gap-2 pl-3 flex-1">
-        <span
-          data-tauri-drag-region
-          className="text-[11px] font-semibold tracking-wide"
-          style={{ color: "hsl(0 0% 65%)" }}
-        >
+      <div className="flex items-center gap-2 pl-3 flex-1 pointer-events-none">
+        <span className="text-[11px] font-semibold tracking-wide text-muted-foreground">
           Gkey Mover v2
         </span>
       </div>
@@ -24,19 +25,19 @@ export function TitleBar() {
           onClick={() => appWindow.minimize()}
           className="h-full w-10 hover:bg-white/10 transition-colors flex items-center justify-center"
         >
-          <Minus className="h-3.5 w-3.5" style={{ color: "hsl(0 0% 65%)" }} />
+          <Minus className="h-3.5 w-3.5 text-muted-foreground" />
         </button>
         <button
           onClick={() => appWindow.toggleMaximize()}
           className="h-full w-10 hover:bg-white/10 transition-colors flex items-center justify-center"
         >
-          <Square className="h-3 w-3" style={{ color: "hsl(0 0% 65%)" }} />
+          <Square className="h-3 w-3 text-muted-foreground" />
         </button>
         <button
           onClick={() => appWindow.hide()}
           className="h-full w-10 hover:bg-red-600 transition-colors flex items-center justify-center"
         >
-          <X className="h-4 w-4" style={{ color: "hsl(0 0% 65%)" }} />
+          <X className="h-4 w-4 text-muted-foreground" />
         </button>
       </div>
     </div>

@@ -25,6 +25,7 @@ export interface AppConfig {
   shadowplay_folder: string | null;
   prompt_capture_software: boolean;
   window_opacity: number;
+  hover_full_opacity: boolean;
 }
 
 export interface LogEntry {
