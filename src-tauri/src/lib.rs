@@ -289,6 +289,34 @@ pub fn run() {
                 });
             }
 
+            // Position window on second monitor if available
+            if let Some(window) = app_handle.get_webview_window("main") {
+                let monitors = window.available_monitors().unwrap_or_default();
+                if monitors.len() > 1 {
+                    let second = &monitors[1];
+                    let pos = second.position();
+                    let _ = window.set_position(tauri::Position::Physical(
+                        tauri::PhysicalPosition { x: pos.x, y: pos.y },
+                    ));
+                }
+            }
+
+            // Apply saved window opacity
+            if config.window_opacity < 1.0 {
+                if let Some(window) = app_handle.get_webview_window("main") {
+                    let opacity = config.window_opacity.clamp(0.2, 1.0);
+                    let alpha = (opacity * 255.0) as u8;
+                    if let Ok(hwnd) = window.hwnd() {
+                        unsafe {
+                            use windows_sys::Win32::UI::WindowsAndMessaging::*;
+                            let ex_style = GetWindowLongW(hwnd.0, GWL_EXSTYLE);
+                            SetWindowLongW(hwnd.0, GWL_EXSTYLE, ex_style | WS_EX_LAYERED as i32);
+                            SetLayeredWindowAttributes(hwnd.0, 0, alpha, LWA_ALPHA);
+                        }
+                    }
+                }
+            }
+
             // Log startup message
             {
                 let mut s = app_state.lock().unwrap();
@@ -311,6 +339,7 @@ pub fn run() {
             commands::restore_log,
             commands::restart_watcher,
             commands::open_folder,
+            commands::set_window_opacity,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {

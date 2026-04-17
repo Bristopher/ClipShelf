@@ -68,6 +68,23 @@ export function SettingsSheet({
                 </Button>
               </div>
             </div>
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs">
+                  Window Opacity ({Math.round((config.window_opacity ?? 1) * 100)}%)
+                </Label>
+              </div>
+              <input
+                type="range"
+                min="20"
+                max="100"
+                value={Math.round((config.window_opacity ?? 1) * 100)}
+                onChange={(e) =>
+                  update({ window_opacity: Number(e.target.value) / 100 })
+                }
+                className="w-full h-1.5 rounded-full appearance-none cursor-pointer bg-secondary accent-primary"
+              />
+            </div>
           </section>
 
           <Separator />

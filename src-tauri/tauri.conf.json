@@ -14,9 +14,11 @@
       {
         "title": "Gkey Mover v2",
         "width": 900,
-        "height": 300,
+        "height": 260,
         "resizable": true,
-        "alwaysOnTop": true
+        "alwaysOnTop": true,
+        "decorations": false,
+        "transparent": true
       }
     ],
     "security": {

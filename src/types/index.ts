@@ -24,6 +24,7 @@ export interface AppConfig {
   obs_websocket_password: string;
   shadowplay_folder: string | null;
   prompt_capture_software: boolean;
+  window_opacity: number;
 }
 
 export interface LogEntry {

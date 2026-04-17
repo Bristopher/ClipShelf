@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { getConfig, updateConfig, pressGkey } from "@/lib/commands";
+import { getConfig, updateConfig, pressGkey, setWindowOpacity } from "@/lib/commands";
 import { EVENTS } from "@/lib/events";
 import { useEventLog } from "@/hooks/useEventLog";
 import { useTimer } from "@/hooks/useTimer";
@@ -10,6 +10,7 @@ import { TimerDisplay } from "@/components/TimerDisplay";
 import { BottomBar } from "@/components/BottomBar";
 import { SettingsSheet } from "@/components/SettingsSheet";
 import { RenameDialog } from "@/components/RenameDialog";
+import { TitleBar } from "@/components/TitleBar";
 import type { AppConfig } from "@/types";
 
 function App() {
@@ -57,6 +58,13 @@ function App() {
     };
   }, [config?.auto_wipe_enabled, clearRef]);
 
+  // Apply window opacity when config loads or changes
+  useEffect(() => {
+    if (config?.window_opacity != null) {
+      setWindowOpacity(config.window_opacity).catch(console.error);
+    }
+  }, [config?.window_opacity]);
+
   const initialSecs = config ? Math.floor(config.timer_duration_ms / 1000) : 70;
   const timer = useTimer(initialSecs);
 
@@ -69,23 +77,26 @@ function App() {
   }
 
   return (
-    <div className="flex h-screen">
-      <Sidebar onSettingsClick={() => setSettingsOpen(true)} />
-      <main className="flex-1 flex flex-col min-w-0">
-        <EventLog entries={entries} />
-        <BottomBar
-          mode={config.disable_file_movesorting ? "rename" : "sort"}
-          autoWipe={config.auto_wipe_enabled}
-          onAutoWipeChange={(v) => updateConfig({ auto_wipe_enabled: v }).then(setConfig)}
-          onWipe={clear}
-          onRestore={restore}
+    <div className="flex flex-col h-screen">
+      <TitleBar />
+      <div className="flex flex-1 min-h-0">
+        <Sidebar onSettingsClick={() => setSettingsOpen(true)} />
+        <main className="flex-1 flex flex-col min-w-0">
+          <EventLog entries={entries} />
+          <BottomBar
+            mode={config.disable_file_movesorting ? "rename" : "sort"}
+            autoWipe={config.auto_wipe_enabled}
+            onAutoWipeChange={(v) => updateConfig({ auto_wipe_enabled: v }).then(setConfig)}
+            onWipe={clear}
+            onRestore={restore}
+          />
+        </main>
+        <TimerDisplay
+          remainingSecs={timer.remainingSecs}
+          totalSecs={timer.totalSecs}
+          running={timer.running}
         />
-      </main>
-      <TimerDisplay
-        remainingSecs={timer.remainingSecs}
-        totalSecs={timer.totalSecs}
-        running={timer.running}
-      />
+      </div>
       <SettingsSheet
         open={settingsOpen}
         onOpenChange={setSettingsOpen}

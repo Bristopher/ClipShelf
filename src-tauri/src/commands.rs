@@ -225,3 +225,20 @@ pub fn restart_watcher(channels: State<'_, ChannelState>) -> Result<(), String> 
 pub fn open_folder(path: String) -> Result<(), String> {
     opener::open(&path).map_err(|e| e.to_string())
 }
+
+#[tauri::command]
+pub fn set_window_opacity(opacity: f64, window: tauri::Window) -> Result<(), String> {
+    let clamped = opacity.clamp(0.2, 1.0);
+    let alpha = (clamped * 255.0) as u8;
+
+    let hwnd = window.hwnd().map_err(|e| e.to_string())?.0;
+
+    unsafe {
+        use windows_sys::Win32::UI::WindowsAndMessaging::*;
+        let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE);
+        SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style | WS_EX_LAYERED as i32);
+        SetLayeredWindowAttributes(hwnd, 0, alpha, LWA_ALPHA);
+    }
+
+    Ok(())
+}
