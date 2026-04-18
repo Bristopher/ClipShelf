@@ -16,6 +16,7 @@ src-tauri/.tauri.dev.json
 *.local
 *.exe
 _hold/
+.myArchive/
 
 # Editor directories and files
 .vscode/*
