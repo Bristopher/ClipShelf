@@ -4,6 +4,7 @@ import { getConfig, updateConfig, pressGkey, setWindowOpacity } from "@/lib/comm
 import { EVENTS } from "@/lib/events";
 import { useEventLog } from "@/hooks/useEventLog";
 import { useTimer } from "@/hooks/useTimer";
+import { useTheme } from "@/hooks/useTheme";
 import { EventLog } from "@/components/EventLog";
 import { Sidebar } from "@/components/Sidebar";
 import { TimerDisplay } from "@/components/TimerDisplay";
@@ -17,6 +18,7 @@ function App() {
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const { entries, clear, restore } = useEventLog();
+  useTheme(config);
 
   useEffect(() => {
     getConfig().then(setConfig).catch(console.error);

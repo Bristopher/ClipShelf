@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+use crate::theme::Theme;
+
 // --- Default value functions ---
 
 fn default_screen_capture_software() -> String { "obs".to_string() }
@@ -30,6 +32,8 @@ fn default_shadowplay_folder() -> Option<String> { None }
 fn default_prompt_capture_software() -> bool { false }
 fn default_window_opacity() -> f64 { 1.0 }
 fn default_hover_full_opacity() -> bool { true }
+fn default_active_theme_id() -> String { "dark".to_string() }
+fn default_themes() -> Vec<Theme> { Vec::new() }
 
 // --- AppConfig struct ---
 
@@ -115,6 +119,12 @@ pub struct AppConfig {
 
     #[serde(default = "default_hover_full_opacity")]
     pub hover_full_opacity: bool,
+
+    #[serde(default = "default_active_theme_id")]
+    pub active_theme_id: String,
+
+    #[serde(default = "default_themes")]
+    pub themes: Vec<Theme>,
 }
 
 impl Default for AppConfig {
@@ -147,6 +157,8 @@ impl Default for AppConfig {
             prompt_capture_software: default_prompt_capture_software(),
             window_opacity: default_window_opacity(),
             hover_full_opacity: default_hover_full_opacity(),
+            active_theme_id: default_active_theme_id(),
+            themes: default_themes(),
         }
     }
 }

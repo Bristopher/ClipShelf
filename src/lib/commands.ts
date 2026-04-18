@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AppConfig, LogEntry } from "../types";
+import type { AppConfig, LogEntry, Theme } from "../types";
 
 export const getConfig = () => invoke<AppConfig>("get_config");
 export const updateConfig = (partial: Partial<AppConfig>) => invoke<AppConfig>("update_config", { partial });
@@ -11,3 +11,6 @@ export const restartWatcher = () => invoke<void>("restart_watcher");
 export const openFolder = (path: string) => invoke<void>("open_folder", { path });
 export const setWindowOpacity = (opacity: number) => invoke<void>("set_window_opacity", { opacity });
 export const resetWindow = () => invoke<void>("reset_window");
+export const importTheme = (path: string) => invoke<Theme>("import_theme", { path });
+export const exportTheme = (path: string, themeId: string) =>
+  invoke<void>("export_theme", { path, themeId });

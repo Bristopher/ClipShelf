@@ -1,9 +1,9 @@
 # Theming System
 
-**Status:** 🔜 Planned
+**Status:** ✅ Production
 **Author:** Bristopher
 **Date:** 2026-04-18
-**Version:** 0.1.0 (design)
+**Version:** 1.0.0
 **Last Updated:** 2026-04-18
 
 ---
@@ -154,19 +154,21 @@ Rather than exposing every shadcn/Tailwind variable, the theme schema exposes a 
 - Fallback target if a user's custom theme becomes unreadable.
 - Sets the visual reference for custom theme authors.
 
-**Token values (draft):**
+**Token values (shipped):**
 
-| Token | Dark (current) | Light | Pink |
-|-------|---------------|-------|------|
-| `title_bar` | `oklch(0.205 0 0)` | `oklch(0.96 0 0)` | `#f9a8d4` |
-| `app_bg` | `oklch(0.145 0 0)` | `oklch(1 0 0)` | `#fdf2f8` |
-| `panel_bg` | `oklch(0.20 0 0)` | `oklch(0.97 0 0)` | `#fce7f3` |
-| `text` | `oklch(0.985 0 0)` | `oklch(0.145 0 0)` | `#4a044e` |
-| `text_muted` | `oklch(0.708 0 0)` | `oklch(0.45 0 0)` | `#9d174d` |
-| `border` | `oklch(1 0 0 / 10%)` | `oklch(0 0 0 / 10%)` | `#f472b6` |
-| `g1_accent` | `#3b82f6` | `#2563eb` | `#ec4899` |
-| `g2_accent` | `#a855f7` | `#7c3aed` | `#f472b6` |
-| `g3_accent` | `#f59e0b` | `#d97706` | `#fbcfe8` |
+| Token | Dark | Light | Pink |
+|-------|------|-------|------|
+| `title_bar` | `oklch(0.269 0 0)` | `#f3f4f6` | `#f9a8d4` |
+| `app_bg` | `oklch(0.145 0 0)` | `#ffffff` | `#fdf2f8` |
+| `panel_bg` | `oklch(0.205 0 0)` | `#f9fafb` | `#fce7f3` |
+| `text` | `oklch(0.985 0 0)` | `#111827` | `#500724` |
+| `text_muted` | `oklch(0.708 0 0)` | `#6b7280` | `#9d174d` |
+| `border` | `oklch(1 0 0 / 10%)` | `#e5e7eb` | `#f9a8d4` |
+| `hover_bg` | `oklch(1 0 0 / 15%)` | `rgba(0,0,0,0.06)` | `rgba(236,72,153,0.15)` |
+| `g1_accent` | `#2563eb` | `#2563eb` | `#ec4899` |
+| `g2_accent` | `#16a34a` | `#16a34a` | `#f472b6` |
+| `g3_accent` | `#ea580c` | `#ea580c` | `#db2777` |
+| `g4_accent` | `#9333ea` | `#9333ea` | `#be185d` |
 
 #### Feature 2: Custom theme CRUD
 **Description:** Users can clone the active theme, rename it, edit any token via hex input + swatch, and delete.
@@ -210,7 +212,7 @@ Rather than exposing every shadcn/Tailwind variable, the theme schema exposes a 
 - Duplicate-name imports get a ` (imported)` suffix.
 
 #### Feature 4: Per-G-key accent coloring
-**Description:** G1/G2/G3 buttons in the BottomBar derive their background/border/ring from the theme tokens `g1_accent`, `g2_accent`, `g3_accent`.
+**Description:** Sidebar G1/G2/G3/G4 buttons derive their background color from the theme tokens `g1_accent` / `g2_accent` / `g3_accent` / `g4_accent`. Hover brightens the accent by 10% via `filter: brightness(1.1)` rather than a separate hover token — keeps the palette concise.
 **Status:** 🔜 Planned
 **Priority:** Medium
 
@@ -660,8 +662,11 @@ Not instrumented. If a user reports lag, capture a Chromium DevTools performance
 
 ## Changelog
 
+### v1.0.0 — 2026-04-18
+- Shipped. 11-token vocabulary (added `hover_bg` for button hover surface, and `g4_accent` for the Rename button). Dark / Light / Pink built-ins, custom theme CRUD, import/export.
+
 ### v0.1.0 — 2026-04-18
-- Initial design doc. No implementation yet.
+- Initial design doc.
 
 ---
 

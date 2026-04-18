@@ -14,6 +14,7 @@ import { Folder } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getVersion } from "@tauri-apps/api/app";
 import { updateConfig } from "@/lib/commands";
+import { ThemePanel } from "@/components/ThemePanel";
 import type { AppConfig } from "@/types";
 
 interface SettingsSheetProps {
@@ -101,6 +102,10 @@ export function SettingsSheet({
               />
             </div>
           </section>
+
+          <Separator />
+
+          <ThemePanel config={config} onConfigChange={onConfigChange} />
 
           <Separator />
 

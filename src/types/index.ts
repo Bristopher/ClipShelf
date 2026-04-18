@@ -1,3 +1,54 @@
+export interface ThemeTokens {
+  title_bar: string;
+  app_bg: string;
+  panel_bg: string;
+  text: string;
+  text_muted: string;
+  border: string;
+  hover_bg: string;
+  g1_accent: string;
+  g2_accent: string;
+  g3_accent: string;
+  g4_accent: string;
+}
+
+export interface Theme {
+  id: string;
+  name: string;
+  builtin: boolean;
+  tokens: ThemeTokens;
+}
+
+export type ThemeTokenKey = keyof ThemeTokens;
+
+export const THEME_TOKEN_ORDER: readonly ThemeTokenKey[] = [
+  "title_bar",
+  "app_bg",
+  "panel_bg",
+  "text",
+  "text_muted",
+  "border",
+  "hover_bg",
+  "g1_accent",
+  "g2_accent",
+  "g3_accent",
+  "g4_accent",
+] as const;
+
+export const THEME_TOKEN_LABELS: Record<ThemeTokenKey, string> = {
+  title_bar: "Title Bar",
+  app_bg: "App Background",
+  panel_bg: "Panel Background",
+  text: "Text",
+  text_muted: "Muted Text",
+  border: "Border",
+  hover_bg: "Hover",
+  g1_accent: "G1 Button",
+  g2_accent: "G2 Button",
+  g3_accent: "G3 Button",
+  g4_accent: "G4 Button",
+};
+
 export interface AppConfig {
   screen_capture_software: string;
   videos_folder: string;
@@ -26,6 +77,8 @@ export interface AppConfig {
   prompt_capture_software: boolean;
   window_opacity: number;
   hover_full_opacity: boolean;
+  active_theme_id: string;
+  themes: Theme[];
 }
 
 export interface LogEntry {

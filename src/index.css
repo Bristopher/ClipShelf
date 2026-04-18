@@ -43,6 +43,17 @@
 }
 
 @theme inline {
+  --color-title-bar: var(--t-title-bar);
+  --color-app-bg: var(--t-app-bg);
+  --color-panel: var(--t-panel-bg);
+  --color-t-text: var(--t-text);
+  --color-t-muted: var(--t-text-muted);
+  --color-t-border: var(--t-border);
+  --color-hover: var(--t-hover-bg);
+  --color-g1: var(--t-g1-accent);
+  --color-g2: var(--t-g2-accent);
+  --color-g3: var(--t-g3-accent);
+  --color-g4: var(--t-g4-accent);
   --font-heading: var(--font-sans);
   --font-sans: 'Geist Variable', sans-serif;
   --color-sidebar-ring: var(--sidebar-ring);
@@ -159,4 +170,39 @@
   [role="button"]:not([aria-disabled="true"]) {
     cursor: pointer;
   }
+}
+
+/* ── Theme tokens ──
+   Runtime-mutable by applyTheme() in src/lib/themes.ts. Values seeded to
+   the Dark built-in; useTheme() overwrites on mount. Defined here rather
+   than only at runtime so the first paint matches before React runs.
+   The shadcn tokens below alias onto --t-* so existing components
+   (muted-foreground, popover, secondary, etc.) pick up the theme. */
+:root {
+  --t-title-bar: oklch(0.269 0 0);
+  --t-app-bg: oklch(0.145 0 0);
+  --t-panel-bg: oklch(0.205 0 0);
+  --t-text: oklch(0.985 0 0);
+  --t-text-muted: oklch(0.708 0 0);
+  --t-border: oklch(1 0 0 / 10%);
+  --t-hover-bg: oklch(1 0 0 / 15%);
+  --t-g1-accent: #2563eb;
+  --t-g2-accent: #16a34a;
+  --t-g3-accent: #ea580c;
+  --t-g4-accent: #9333ea;
+
+  --background: var(--t-app-bg);
+  --foreground: var(--t-text);
+  --card: var(--t-panel-bg);
+  --card-foreground: var(--t-text);
+  --popover: var(--t-panel-bg);
+  --popover-foreground: var(--t-text);
+  --secondary: var(--t-panel-bg);
+  --secondary-foreground: var(--t-text);
+  --muted: var(--t-panel-bg);
+  --muted-foreground: var(--t-text-muted);
+  --accent: var(--t-panel-bg);
+  --accent-foreground: var(--t-text);
+  --border: var(--t-border);
+  --input: var(--t-border);
 }

@@ -7,6 +7,7 @@ mod mover;
 mod obs_ws;
 mod sound;
 mod state;
+mod theme;
 mod timer;
 mod tray;
 mod watcher;
@@ -348,6 +349,8 @@ pub fn run() {
             commands::open_folder,
             commands::set_window_opacity,
             commands::reset_window,
+            commands::import_theme,
+            commands::export_theme,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {

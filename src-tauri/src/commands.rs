@@ -5,6 +5,7 @@ use crate::events::*;
 use crate::mover;
 use crate::sound;
 use crate::state::{AppState, ChannelState, CurrentFile};
+use crate::theme::{Theme, ThemeExport, THEME_SCHEMA};
 use crate::watcher::WatcherCommand;
 
 #[tauri::command]
@@ -224,6 +225,74 @@ pub fn restart_watcher(channels: State<'_, ChannelState>) -> Result<(), String> 
 #[tauri::command]
 pub fn open_folder(path: String) -> Result<(), String> {
     opener::open(&path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn import_theme(path: String) -> Result<Theme, String> {
+    let contents = std::fs::read_to_string(&path)
+        .map_err(|e| format!("io: {}", e))?;
+    let envelope: ThemeExport = serde_json::from_str(&contents)
+        .map_err(|e| format!("invalid JSON: {}", e))?;
+    if envelope.schema != THEME_SCHEMA {
+        return Err(format!(
+            "invalid schema: expected {}, got {}",
+            THEME_SCHEMA, envelope.schema
+        ));
+    }
+    let name = envelope.name.trim();
+    if name.is_empty() {
+        return Err("invalid name: empty".into());
+    }
+    let id = slugify(name);
+    Ok(Theme {
+        id,
+        name: name.to_string(),
+        builtin: false,
+        tokens: envelope.tokens,
+    })
+}
+
+#[tauri::command]
+pub fn export_theme(
+    path: String,
+    theme_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    let builtins = crate::theme::builtin_themes();
+    let theme = builtins
+        .iter()
+        .chain(s.config.themes.iter())
+        .find(|t| t.id == theme_id)
+        .ok_or_else(|| format!("theme not found: {}", theme_id))?;
+    let envelope = ThemeExport {
+        schema: THEME_SCHEMA.into(),
+        name: theme.name.clone(),
+        tokens: theme.tokens.clone(),
+    };
+    let json = serde_json::to_string_pretty(&envelope).map_err(|e| e.to_string())?;
+    std::fs::write(&path, json).map_err(|e| format!("io: {}", e))?;
+    Ok(())
+}
+
+fn slugify(name: &str) -> String {
+    let mut out = String::new();
+    let mut prev_dash = false;
+    for c in name.chars() {
+        if c.is_ascii_alphanumeric() {
+            out.push(c.to_ascii_lowercase());
+            prev_dash = false;
+        } else if !prev_dash && !out.is_empty() {
+            out.push('-');
+            prev_dash = true;
+        }
+    }
+    let trimmed = out.trim_end_matches('-').to_string();
+    if trimmed.is_empty() {
+        "custom".to_string()
+    } else {
+        trimmed
+    }
 }
 
 #[tauri::command]

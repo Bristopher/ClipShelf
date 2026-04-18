@@ -34,13 +34,13 @@ export function TitleBar() {
   return (
     <div
       onMouseDown={startDrag}
-      className="relative h-7 flex items-center justify-between bg-secondary/80 border-b border-border select-none shrink-0 cursor-default"
+      className="relative h-7 flex items-center justify-between bg-title-bar border-b border-t-border select-none shrink-0 cursor-default"
     >
       <div className="flex items-center gap-2 pl-3 flex-1 relative">
         <span
           onMouseEnter={() => onEnter("title")}
           onMouseLeave={onLeave}
-          className="text-[11px] font-semibold tracking-wide text-muted-foreground hover:text-foreground transition-colors"
+          className="text-[11px] font-semibold tracking-wide text-t-muted hover:text-t-text transition-colors"
         >
           GKey Mover
         </span>
@@ -58,7 +58,7 @@ export function TitleBar() {
             onLeave();
             appWindow.minimize();
           }}
-          hoverClass="hover:bg-white/15 hover:text-foreground"
+          hoverClass="hover:bg-hover hover:text-t-text"
         >
           <Minus className="h-3.5 w-3.5" />
         </BarButton>
@@ -71,7 +71,7 @@ export function TitleBar() {
             onLeave();
             resetWindow().catch(console.error);
           }}
-          hoverClass="hover:bg-white/15 hover:text-foreground"
+          hoverClass="hover:bg-hover hover:text-t-text"
         >
           <Square className="h-3 w-3" />
         </BarButton>
@@ -116,7 +116,7 @@ function BarButton({
         onMouseEnter={onEnter}
         onMouseLeave={onLeave}
         onClick={onClick}
-        className={`h-full w-10 flex items-center justify-center text-muted-foreground transition-colors ${hoverClass}`}
+        className={`h-full w-10 flex items-center justify-center text-t-muted transition-colors ${hoverClass}`}
       >
         {children}
       </button>
