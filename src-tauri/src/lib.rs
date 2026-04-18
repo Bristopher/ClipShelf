@@ -317,6 +317,13 @@ pub fn run() {
                 }
             }
 
+            // Window starts hidden (see tauri.conf.json). Reveal now that
+            // position and opacity have been applied — avoids the flash of
+            // window appearing on the primary monitor before jumping.
+            if let Some(window) = app_handle.get_webview_window("main") {
+                let _ = window.show();
+            }
+
             // Log startup message
             {
                 let mut s = app_state.lock().unwrap();
