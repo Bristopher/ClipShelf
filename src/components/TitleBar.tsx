@@ -31,12 +31,6 @@ export function TitleBar() {
     setHovered(null);
   };
 
-  const buttonTip =
-    hovered === "min" ? "Minimize"
-    : hovered === "max" ? "Reset size & position"
-    : hovered === "close" ? "Hide to tray"
-    : null;
-
   return (
     <div
       onMouseDown={startDrag}
@@ -51,63 +45,109 @@ export function TitleBar() {
           GKey Mover
         </span>
         {hovered === "title" && version && (
-          <div
-            className="absolute top-full left-2 mt-1.5 pointer-events-none z-50"
-            aria-hidden="true"
-          >
-            <div className="relative px-2.5 py-1 rounded-md bg-popover text-popover-foreground text-[11px] font-medium shadow-lg border border-border whitespace-nowrap animate-in fade-in-0 zoom-in-95 duration-150">
-              v{version}
-              <div className="absolute -top-1 left-3 w-2 h-2 bg-popover border-l border-t border-border rotate-45" />
-            </div>
-          </div>
+          <Tooltip align="left-start" text={`v${version}`} />
         )}
       </div>
-      <div className="flex items-center h-full relative">
-        <button
-          onMouseEnter={() => onEnter("min")}
-          onMouseLeave={onLeave}
+      <div className="flex items-center h-full">
+        <BarButton
+          active={hovered === "min"}
+          tip="Minimize"
+          onEnter={() => onEnter("min")}
+          onLeave={onLeave}
           onClick={() => {
             onLeave();
             appWindow.minimize();
           }}
-          className="h-full w-10 flex items-center justify-center text-muted-foreground hover:bg-white/15 hover:text-foreground transition-colors"
+          hoverClass="hover:bg-white/15 hover:text-foreground"
         >
           <Minus className="h-3.5 w-3.5" />
-        </button>
-        <button
-          onMouseEnter={() => onEnter("max")}
-          onMouseLeave={onLeave}
+        </BarButton>
+        <BarButton
+          active={hovered === "max"}
+          tip="Reset size & position"
+          onEnter={() => onEnter("max")}
+          onLeave={onLeave}
           onClick={() => {
             onLeave();
             resetWindow().catch(console.error);
           }}
-          className="h-full w-10 flex items-center justify-center text-muted-foreground hover:bg-white/15 hover:text-foreground transition-colors"
+          hoverClass="hover:bg-white/15 hover:text-foreground"
         >
           <Square className="h-3 w-3" />
-        </button>
-        <button
-          onMouseEnter={() => onEnter("close")}
-          onMouseLeave={onLeave}
+        </BarButton>
+        <BarButton
+          active={hovered === "close"}
+          tip="Hide to tray"
+          onEnter={() => onEnter("close")}
+          onLeave={onLeave}
           onClick={() => {
             onLeave();
             appWindow.hide();
           }}
-          className="h-full w-10 flex items-center justify-center text-muted-foreground hover:bg-red-600 hover:text-white transition-colors"
+          hoverClass="hover:bg-red-600 hover:text-white"
         >
           <X className="h-4 w-4" />
-        </button>
+        </BarButton>
+      </div>
+    </div>
+  );
+}
 
-        {buttonTip && (
-          <div
-            className="absolute top-full right-0 mt-1.5 mr-1 pointer-events-none z-50"
-            aria-hidden="true"
-          >
-            <div className="relative px-2.5 py-1 rounded-md bg-popover text-popover-foreground text-[11px] font-medium shadow-lg border border-border whitespace-nowrap animate-in fade-in-0 zoom-in-95 duration-150">
-              {buttonTip}
-              <div className="absolute -top-1 right-3 w-2 h-2 bg-popover border-l border-t border-border rotate-45" />
-            </div>
-          </div>
-        )}
+function BarButton({
+  active,
+  tip,
+  onEnter,
+  onLeave,
+  onClick,
+  hoverClass,
+  children,
+}: {
+  active: boolean;
+  tip: string;
+  onEnter: () => void;
+  onLeave: () => void;
+  onClick: () => void;
+  hoverClass: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="relative h-full">
+      <button
+        onMouseEnter={onEnter}
+        onMouseLeave={onLeave}
+        onClick={onClick}
+        className={`h-full w-10 flex items-center justify-center text-muted-foreground transition-colors ${hoverClass}`}
+      >
+        {children}
+      </button>
+      {active && <Tooltip align="center" text={tip} />}
+    </div>
+  );
+}
+
+function Tooltip({
+  text,
+  align,
+}: {
+  text: string;
+  align: "center" | "left-start";
+}) {
+  const positionClass =
+    align === "center"
+      ? "left-1/2 -translate-x-1/2"
+      : "left-0";
+  const arrowClass =
+    align === "center" ? "left-1/2 -translate-x-1/2" : "left-3";
+  return (
+    <div
+      className={`absolute top-full mt-1.5 pointer-events-none z-50 ${positionClass}`}
+      aria-hidden="true"
+    >
+      <div className="relative px-2.5 py-1 rounded-md bg-popover text-popover-foreground text-[11px] font-medium shadow-lg border border-border whitespace-nowrap animate-in fade-in-0 zoom-in-95 duration-150">
+        {text}
+        <div
+          className={`absolute -top-1 w-2 h-2 bg-popover border-l border-t border-border rotate-45 ${arrowClass}`}
+        />
       </div>
     </div>
   );
