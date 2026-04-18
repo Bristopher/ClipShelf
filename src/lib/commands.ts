@@ -10,3 +10,4 @@ export const restoreLog = () => invoke<LogEntry[]>("restore_log");
 export const restartWatcher = () => invoke<void>("restart_watcher");
 export const openFolder = (path: string) => invoke<void>("open_folder", { path });
 export const setWindowOpacity = (opacity: number) => invoke<void>("set_window_opacity", { opacity });
+export const resetWindow = () => invoke<void>("reset_window");

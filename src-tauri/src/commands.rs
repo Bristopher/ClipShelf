@@ -227,6 +227,35 @@ pub fn open_folder(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn reset_window(window: tauri::Window) -> Result<(), String> {
+    // Default size matches tauri.conf.json window config.
+    const DEFAULT_W: u32 = 900;
+    const DEFAULT_H: u32 = 260;
+
+    let monitors = window.available_monitors().map_err(|e| e.to_string())?;
+    let target = if monitors.len() > 1 {
+        &monitors[1]
+    } else {
+        monitors.first().ok_or("no monitors available")?
+    };
+    let pos = target.position();
+
+    window
+        .set_position(tauri::Position::Physical(tauri::PhysicalPosition {
+            x: pos.x,
+            y: pos.y,
+        }))
+        .map_err(|e| e.to_string())?;
+    window
+        .set_size(tauri::Size::Physical(tauri::PhysicalSize {
+            width: DEFAULT_W,
+            height: DEFAULT_H,
+        }))
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
 pub fn set_window_opacity(opacity: f64, window: tauri::Window) -> Result<(), String> {
     let clamped = opacity.clamp(0.2, 1.0);
     let alpha = (clamped * 255.0) as u8;

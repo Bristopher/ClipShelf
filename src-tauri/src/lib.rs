@@ -340,6 +340,7 @@ pub fn run() {
             commands::restart_watcher,
             commands::open_folder,
             commands::set_window_opacity,
+            commands::reset_window,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
