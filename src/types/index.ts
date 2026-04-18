@@ -79,6 +79,7 @@ export interface AppConfig {
   hover_full_opacity: boolean;
   active_theme_id: string;
   themes: Theme[];
+  save_clip_bind: string;
 }
 
 export interface LogEntry {

@@ -32,6 +32,9 @@ use watcher::{WatcherCommand, WatcherEvent};
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let app_handle = app.handle().clone();
 
@@ -333,7 +336,7 @@ pub fn run() {
             .inner_size(640.0, 720.0)
             .min_inner_size(500.0, 500.0)
             .resizable(true)
-            .decorations(true)
+            .decorations(false)
             .center()
             .visible(false)
             .background_color(Color(10, 10, 10, 255))
@@ -345,10 +348,10 @@ pub fn run() {
                 WebviewUrl::App(std::path::PathBuf::new()),
             )
             .title("GKey Mover — Setup")
-            .inner_size(520.0, 540.0)
+            .inner_size(520.0, 560.0)
             .min_inner_size(480.0, 480.0)
             .resizable(true)
-            .decorations(true)
+            .decorations(false)
             .center()
             .visible(false)
             .background_color(Color(10, 10, 10, 255))

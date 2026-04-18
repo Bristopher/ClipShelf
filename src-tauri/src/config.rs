@@ -34,6 +34,7 @@ fn default_window_opacity() -> f64 { 1.0 }
 fn default_hover_full_opacity() -> bool { true }
 fn default_active_theme_id() -> String { "dark".to_string() }
 fn default_themes() -> Vec<Theme> { Vec::new() }
+fn default_save_clip_bind() -> String { "".to_string() }
 
 // --- AppConfig struct ---
 
@@ -125,6 +126,13 @@ pub struct AppConfig {
 
     #[serde(default = "default_themes")]
     pub themes: Vec<Theme>,
+
+    /// Keybind the user presses in their capture app (OBS / ShadowPlay) to
+    /// save a clip. Not currently listened to by GKey Mover — informational
+    /// for the user, and hooked in future phases to surface "no clip
+    /// arrived" errors in the event log.
+    #[serde(default = "default_save_clip_bind")]
+    pub save_clip_bind: String,
 }
 
 impl Default for AppConfig {
@@ -159,6 +167,7 @@ impl Default for AppConfig {
             hover_full_opacity: default_hover_full_opacity(),
             active_theme_id: default_active_theme_id(),
             themes: default_themes(),
+            save_clip_bind: default_save_clip_bind(),
         }
     }
 }

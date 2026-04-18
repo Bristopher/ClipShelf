@@ -91,6 +91,18 @@ export function SettingsForm({ config, onConfigChange }: SettingsFormProps) {
 
       <section className="space-y-3">
         <h3 className="text-sm font-semibold">Hotkeys</h3>
+        <div className="space-y-1">
+          <Label className="text-xs">Capture app save-clip hotkey</Label>
+          <Input
+            value={config.save_clip_bind}
+            placeholder="e.g. ctrl+F12"
+            className="text-xs h-8 font-mono"
+            onChange={(e) => update({ save_clip_bind: e.target.value })}
+          />
+          <p className="text-[10px] text-t-muted">
+            Whatever key you press in OBS / ShadowPlay to save a clip.
+          </p>
+        </div>
         {(
           [
             ["g1_bind", "G1 Bind"],
@@ -103,7 +115,7 @@ export function SettingsForm({ config, onConfigChange }: SettingsFormProps) {
             <Label className="text-xs">{label}</Label>
             <Input
               value={config[field]}
-              className="text-xs h-8"
+              className="text-xs h-8 font-mono"
               onChange={(e) => update({ [field]: e.target.value })}
             />
           </div>

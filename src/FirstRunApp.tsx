@@ -10,6 +10,7 @@ import { getConfig, updateConfig } from "@/lib/commands";
 import { EVENTS } from "@/lib/events";
 import { refreshSystemMode } from "@/lib/systemTheme";
 import { useTheme } from "@/hooks/useTheme";
+import { WindowChrome } from "@/components/WindowChrome";
 import logoUrl from "@/assets/gkey-logo.png";
 import type { AppConfig } from "@/types";
 
@@ -20,6 +21,7 @@ export function FirstRunApp() {
   const [g2, setG2] = useState("");
   const [g3, setG3] = useState("");
   const [renameBind, setRenameBind] = useState("");
+  const [saveClipBind, setSaveClipBind] = useState("");
   const [saving, setSaving] = useState(false);
   useTheme(config);
 
@@ -31,6 +33,7 @@ export function FirstRunApp() {
       setG2(cfg.g2_bind);
       setG3(cfg.g3_bind);
       setRenameBind(cfg.rename_bind);
+      setSaveClipBind(cfg.save_clip_bind);
     });
     refreshSystemMode().catch(() => {});
   }, []);
@@ -59,6 +62,7 @@ export function FirstRunApp() {
         g2_bind: g2,
         g3_bind: g3,
         rename_bind: renameBind,
+        save_clip_bind: saveClipBind,
       });
       await getCurrentWindow().hide();
     } finally {
@@ -68,14 +72,19 @@ export function FirstRunApp() {
 
   if (!config) {
     return (
-      <div className="h-screen flex items-center justify-center bg-app-bg text-t-muted">
-        <p className="text-sm">Loading...</p>
+      <div className="flex flex-col h-screen bg-app-bg text-t-text">
+        <WindowChrome title="Setup" />
+        <div className="flex-1 flex items-center justify-center">
+          <p className="text-sm text-t-muted">Loading...</p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="h-screen overflow-y-auto bg-app-bg text-t-text">
+    <div className="flex flex-col h-screen bg-app-bg text-t-text">
+      <WindowChrome title="Setup" />
+      <div className="flex-1 overflow-y-auto">
       <div className="max-w-md mx-auto px-6 py-6 space-y-5">
         <header className="flex items-center gap-3">
           <img src={logoUrl} alt="" className="h-10 w-10 rounded" />
@@ -120,7 +129,20 @@ export function FirstRunApp() {
         </div>
 
         <div className="space-y-2 pt-2 border-t border-t-border">
-          <Label className="text-xs font-semibold">Hotkeys (optional)</Label>
+          <Label className="text-xs font-semibold">Capture app hotkey</Label>
+          <p className="text-[10px] text-t-muted">
+            The key you press in OBS / ShadowPlay to save a clip. Optional —
+            used later to detect "hit save but no file appeared" errors.
+          </p>
+          <KeyRow
+            label="Save clip"
+            value={saveClipBind}
+            onChange={setSaveClipBind}
+          />
+        </div>
+
+        <div className="space-y-2 pt-2 border-t border-t-border">
+          <Label className="text-xs font-semibold">GKey Mover hotkeys</Label>
           <p className="text-[10px] text-t-muted">
             Defaults shown — tweak later in Settings if they clash.
           </p>
@@ -137,6 +159,7 @@ export function FirstRunApp() {
             {saving ? "Saving..." : "Let's go"}
           </Button>
         </div>
+      </div>
       </div>
     </div>
   );
