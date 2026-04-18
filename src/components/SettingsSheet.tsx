@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import {
   Sheet,
   SheetContent,
@@ -11,6 +12,7 @@ import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
 import { Folder } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
+import { getVersion } from "@tauri-apps/api/app";
 import { updateConfig } from "@/lib/commands";
 import type { AppConfig } from "@/types";
 
@@ -27,6 +29,12 @@ export function SettingsSheet({
   config,
   onConfigChange,
 }: SettingsSheetProps) {
+  const [version, setVersion] = useState<string>("");
+
+  useEffect(() => {
+    getVersion().then(setVersion).catch(console.error);
+  }, []);
+
   const update = async (partial: Partial<AppConfig>) => {
     const updated = await updateConfig(partial);
     onConfigChange(updated);
@@ -237,6 +245,14 @@ export function SettingsSheet({
                 />
               </div>
             )}
+          </section>
+
+          <Separator />
+
+          <section className="pt-1 pb-2">
+            <p className="text-[11px] text-muted-foreground text-center">
+              GKey Mover {version ? `v${version}` : ""}
+            </p>
           </section>
         </div>
       </SheetContent>

@@ -329,7 +329,7 @@ pub fn run() {
                 let mut s = app_state.lock().unwrap();
                 let entry = s.logger.log(
                     LogLevel::Info,
-                    "Gkey Mover v2 started".to_string(),
+                    "GKey Mover started".to_string(),
                     LogCategory::System,
                 );
                 let _ = app_handle.emit("log-entry", &entry);

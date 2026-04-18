@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Gkey Mover v2",
+  "productName": "GKey Mover",
   "version": "2.0.0",
   "identifier": "com.cbuzi.gkey-mover-v2",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Gkey Mover v2",
+        "title": "GKey Mover",
         "width": 900,
         "height": 260,
         "resizable": true,

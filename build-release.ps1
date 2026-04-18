@@ -82,7 +82,7 @@ if (Test-Path $outDir) {
 }
 
 Set-Location (Join-Path $ProjectRoot "src-tauri")
-vpk pack --packId com.cbuzi.gkey-mover-v2 --packTitle "Gkey Mover v2" --packVersion $version --packDir "target/release" --mainExe "gkey-mover-v2.exe" --icon "icons/icon.ico" --outputDir "Releases/v$version"
+vpk pack --packId com.cbuzi.gkey-mover-v2 --packTitle "GKey Mover" --packVersion $version --packDir "target/release" --mainExe "gkey-mover-v2.exe" --icon "icons/icon.ico" --outputDir "Releases/v$version"
 if ($LASTEXITCODE -ne 0) { throw "vpk pack failed" }
 
 # ── Step 3: Rename setup installer ────────────────────────────────────────────
@@ -91,20 +91,20 @@ Write-Host "Step 3 — Renaming release files..." -ForegroundColor Yellow
 $outDir = Join-Path $ProjectRoot "src-tauri\Releases\v$version"
 
 $setupSrc = Join-Path $outDir "com.cbuzi.gkey-mover-v2-win-Setup.exe"
-$setupDst = Join-Path $outDir "GkeyMoverV2_${version}_x64-setup.exe"
+$setupDst = Join-Path $outDir "GKeyMover_${version}_x64-setup.exe"
 if (Test-Path $setupSrc) {
     Rename-Item $setupSrc $setupDst
-    Write-Host "  Setup   -> GkeyMoverV2_${version}_x64-setup.exe" -ForegroundColor Green
+    Write-Host "  Setup   -> GKeyMover_${version}_x64-setup.exe" -ForegroundColor Green
 }
 
 # ── Step 4: Copy portable exe ────────────────────────────────────────────────
 Write-Host ""
 Write-Host "Step 4 — Copying portable exe..." -ForegroundColor Yellow
 $portableSrc = Join-Path $ProjectRoot "src-tauri\target\release\gkey-mover-v2.exe"
-$portableDst = Join-Path $outDir "GkeyMoverV2_${version}_x64-Portable.exe"
+$portableDst = Join-Path $outDir "GKeyMover_${version}_x64-Portable.exe"
 if (Test-Path $portableSrc) {
     Copy-Item $portableSrc $portableDst
-    Write-Host "  Portable -> GkeyMoverV2_${version}_x64-Portable.exe" -ForegroundColor Green
+    Write-Host "  Portable -> GKeyMover_${version}_x64-Portable.exe" -ForegroundColor Green
 }
 
 # ── Done ──────────────────────────────────────────────────────────────────────
