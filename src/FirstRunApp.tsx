@@ -5,6 +5,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { KeybindInput } from "@/components/KeybindInput";
 import { Folder, Sparkles } from "lucide-react";
 import { getConfig, updateConfig } from "@/lib/commands";
 import { EVENTS } from "@/lib/events";
@@ -177,11 +178,7 @@ function KeyRow({
   return (
     <div className="space-y-1">
       <Label className="text-[10px] text-t-muted">{label}</Label>
-      <Input
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="text-[11px] h-7 font-mono"
-      />
+      <KeybindInput value={value} onChange={onChange} />
     </div>
   );
 }

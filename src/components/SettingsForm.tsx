@@ -9,6 +9,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { getVersion } from "@tauri-apps/api/app";
 import { updateConfig } from "@/lib/commands";
 import { ThemePanel } from "@/components/ThemePanel";
+import { KeybindInput } from "@/components/KeybindInput";
 import type { AppConfig } from "@/types";
 
 interface SettingsFormProps {
@@ -93,11 +94,9 @@ export function SettingsForm({ config, onConfigChange }: SettingsFormProps) {
         <h3 className="text-sm font-semibold">Hotkeys</h3>
         <div className="space-y-1">
           <Label className="text-xs">Capture app save-clip hotkey</Label>
-          <Input
+          <KeybindInput
             value={config.save_clip_bind}
-            placeholder="e.g. ctrl+F12"
-            className="text-xs h-8 font-mono"
-            onChange={(e) => update({ save_clip_bind: e.target.value })}
+            onChange={(v) => update({ save_clip_bind: v })}
           />
           <p className="text-[10px] text-t-muted">
             Whatever key you press in OBS / ShadowPlay to save a clip.
@@ -113,10 +112,9 @@ export function SettingsForm({ config, onConfigChange }: SettingsFormProps) {
         ).map(([field, label]) => (
           <div key={field} className="space-y-1">
             <Label className="text-xs">{label}</Label>
-            <Input
+            <KeybindInput
               value={config[field]}
-              className="text-xs h-8 font-mono"
-              onChange={(e) => update({ [field]: e.target.value })}
+              onChange={(v) => update({ [field]: v })}
             />
           </div>
         ))}
