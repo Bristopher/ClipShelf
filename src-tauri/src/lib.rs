@@ -16,7 +16,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use regex::Regex;
-use tauri::{Emitter, Manager};
+use tauri::window::Color;
+use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 use tokio::sync::mpsc;
 
 use config::AppConfig;
@@ -318,6 +319,41 @@ pub fn run() {
                 }
             }
 
+            // Pre-create secondary windows during startup while Tauri still
+            // has its full config (incl. --config devUrl overrides). Creating
+            // them later from a Tauri command produces a blank/frozen webview
+            // in dev, probably because the override devUrl isn't accessible
+            // at runtime the same way it is during setup.
+            let _ = WebviewWindowBuilder::new(
+                &app_handle,
+                "settings",
+                WebviewUrl::App(std::path::PathBuf::new()),
+            )
+            .title("GKey Mover — Settings")
+            .inner_size(640.0, 720.0)
+            .min_inner_size(500.0, 500.0)
+            .resizable(true)
+            .decorations(true)
+            .center()
+            .visible(false)
+            .background_color(Color(10, 10, 10, 255))
+            .build();
+
+            let _ = WebviewWindowBuilder::new(
+                &app_handle,
+                "first-run",
+                WebviewUrl::App(std::path::PathBuf::new()),
+            )
+            .title("GKey Mover — Setup")
+            .inner_size(520.0, 540.0)
+            .min_inner_size(480.0, 480.0)
+            .resizable(true)
+            .decorations(true)
+            .center()
+            .visible(false)
+            .background_color(Color(10, 10, 10, 255))
+            .build();
+
             // Window starts hidden (see tauri.conf.json). Reveal now that
             // position and opacity have been applied — avoids the flash of
             // window appearing on the primary monitor before jumping.
@@ -353,6 +389,7 @@ pub fn run() {
             commands::export_theme,
             commands::get_system_theme_mode,
             commands::open_settings_window,
+            commands::open_first_run_window,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {

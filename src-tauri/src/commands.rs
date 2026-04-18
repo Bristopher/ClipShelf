@@ -368,37 +368,28 @@ fn slugify(name: &str) -> String {
 
 #[tauri::command]
 pub fn open_settings_window(app: AppHandle) -> Result<(), String> {
+    // The settings window is pre-created at startup (see lib.rs) so runtime
+    // URL resolution can't go wrong. This command just reveals it.
     if let Some(existing) = app.get_webview_window("settings") {
         let _ = existing.unminimize();
         let _ = existing.show();
         let _ = existing.set_focus();
         return Ok(());
     }
-    // Reuse the main window's already-resolved URL. Using WebviewUrl::App
-    // with a path was not loading in dev (blank, frozen webview), likely
-    // because the dynamic devUrl override didn't propagate to the second
-    // window. External URL from the main webview dodges the whole
-    // resolution path.
-    let main_url = app
-        .get_webview_window("main")
-        .ok_or_else(|| "main window not found".to_string())?
-        .url()
-        .map_err(|e| e.to_string())?;
+    Err("settings window was not pre-created at startup".into())
+}
 
-    WebviewWindowBuilder::new(&app, "settings", WebviewUrl::External(main_url))
-        .title("GKey Mover — Settings")
-        .inner_size(640.0, 720.0)
-        .min_inner_size(500.0, 500.0)
-        .resizable(true)
-        .decorations(true)
-        .center()
-        // Native-frame color before the webview paints — dark so it blends
-        // with the dark-default theme. Once the webview loads, its inline
-        // script in index.html paints the user's last-used theme color.
-        .background_color(Color(10, 10, 10, 255))
-        .build()
-        .map_err(|e| e.to_string())?;
-    Ok(())
+#[tauri::command]
+pub fn open_first_run_window(app: AppHandle) -> Result<(), String> {
+    // First-run window is also pre-created; reveal + center on call.
+    if let Some(existing) = app.get_webview_window("first-run") {
+        let _ = existing.unminimize();
+        let _ = existing.center();
+        let _ = existing.show();
+        let _ = existing.set_focus();
+        return Ok(());
+    }
+    Err("first-run window was not pre-created at startup".into())
 }
 
 #[tauri::command]

@@ -11,7 +11,7 @@ import { TimerDisplay } from "@/components/TimerDisplay";
 import { BottomBar } from "@/components/BottomBar";
 import { RenameDialog } from "@/components/RenameDialog";
 import { TitleBar } from "@/components/TitleBar";
-import { FirstRunDialog } from "@/components/FirstRunDialog";
+import { openFirstRunWindow } from "@/lib/commands";
 import type { AppConfig } from "@/types";
 
 function App() {
@@ -66,6 +66,13 @@ function App() {
     }
   }, [config?.window_opacity]);
 
+  // First-run flow — open the setup window if no videos folder is set yet.
+  useEffect(() => {
+    if (config && !config.videos_folder) {
+      openFirstRunWindow().catch(console.error);
+    }
+  }, [config?.videos_folder]);
+
   // Hover-to-full-opacity
   const handleMouseEnter = useCallback(() => {
     if (config?.hover_full_opacity && config.window_opacity < 1) {
@@ -116,9 +123,6 @@ function App() {
         />
       </div>
       <RenameDialog />
-      {!config.videos_folder && (
-        <FirstRunDialog config={config} onConfigChange={setConfig} />
-      )}
     </div>
   );
 }

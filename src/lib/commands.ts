@@ -15,3 +15,4 @@ export const importTheme = (path: string) => invoke<Theme>("import_theme", { pat
 export const exportTheme = (path: string, themeId: string) =>
   invoke<void>("export_theme", { path, themeId });
 export const openSettingsWindow = () => invoke<void>("open_settings_window");
+export const openFirstRunWindow = () => invoke<void>("open_first_run_window");
