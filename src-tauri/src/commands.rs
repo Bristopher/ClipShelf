@@ -23,7 +23,8 @@ pub fn update_config(
 ) -> Result<AppConfig, String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     s.config.merge_partial(partial);
-    s.config.save().map_err(|e| e.to_string())?;
+    let path = s.config_path.clone();
+    s.config.save_to(&path).map_err(|e| e.to_string())?;
     let config = s.config.clone();
     let _ = app.emit("config-changed", &config);
     Ok(config)

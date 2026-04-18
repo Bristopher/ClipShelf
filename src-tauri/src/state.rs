@@ -18,18 +18,20 @@ pub struct AppStateInner {
     pub current_file: Option<CurrentFile>,
     pub bind_chosen: Option<String>,
     pub config: AppConfig,
+    pub config_path: PathBuf,
     pub logger: AppLogger,
     pub watcher_restart_count: u32,
     pub timer_running: bool,
 }
 
 impl AppStateInner {
-    pub fn new(config: AppConfig) -> Self {
+    pub fn new(config: AppConfig, config_path: PathBuf) -> Self {
         let logger = AppLogger::new(&config.videos_folder, config.log_file_enabled);
         Self {
             current_file: None,
             bind_chosen: None,
             config,
+            config_path,
             logger,
             watcher_restart_count: 0,
             timer_running: false,

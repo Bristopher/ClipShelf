@@ -38,14 +38,52 @@ pub fn run() {
         .setup(|app| {
             let app_handle = app.handle().clone();
 
-            // Load config
-            let config = AppConfig::load().unwrap_or_else(|e| {
+            // Resolve persistent config path: %APPDATA%/com.cbuzi.gkey-mover-v2/
+            // on Windows (via Tauri's app_config_dir). Create the directory
+            // if missing. Falls back to the exe-adjacent path if Tauri can't
+            // resolve the dir (should never happen in practice).
+            let config_path = match app_handle.path().app_config_dir() {
+                Ok(dir) => {
+                    if let Err(e) = std::fs::create_dir_all(&dir) {
+                        log::warn!("Failed to create app config dir {:?}: {}", dir, e);
+                    }
+                    dir.join("gkey_config.toml")
+                }
+                Err(e) => {
+                    log::warn!("app_config_dir unavailable ({}), falling back to exe-relative", e);
+                    AppConfig::config_path()
+                }
+            };
+
+            // One-time migration: if a legacy config exists next to the exe
+            // and the new one doesn't, copy it over so user settings carry.
+            let legacy_path = AppConfig::config_path();
+            if !config_path.exists() && legacy_path.exists() && legacy_path != config_path {
+                if let Err(e) = std::fs::copy(&legacy_path, &config_path) {
+                    log::warn!(
+                        "Failed to migrate legacy config {:?} -> {:?}: {}",
+                        legacy_path,
+                        config_path,
+                        e
+                    );
+                } else {
+                    log::info!(
+                        "Migrated legacy config {:?} -> {:?}",
+                        legacy_path,
+                        config_path
+                    );
+                }
+            }
+
+            let config = AppConfig::load_from(&config_path).unwrap_or_else(|e| {
                 log::warn!("Failed to load config, using defaults: {}", e);
                 AppConfig::default()
             });
+            log::info!("Config path: {:?}", config_path);
 
             // Create AppState
-            let app_state: AppState = Arc::new(Mutex::new(AppStateInner::new(config.clone())));
+            let app_state: AppState =
+                Arc::new(Mutex::new(AppStateInner::new(config.clone(), config_path.clone())));
             app.manage(app_state.clone());
 
             // Set up system tray
