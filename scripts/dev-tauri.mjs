@@ -47,13 +47,16 @@ if (isDev) {
   const [vitePort, hmrPort] = await findPair();
   console.log(`[tauri] dev ports: vite=${vitePort} hmr=${hmrPort}`);
 
-  const overridePath = path.join(ProjectRoot, "src-tauri", ".tauri.dev.json");
+  const overrideRel = "src-tauri/.tauri.dev.json";
+  const overrideAbs = path.join(ProjectRoot, overrideRel);
   fs.writeFileSync(
-    overridePath,
+    overrideAbs,
     JSON.stringify({ build: { devUrl: `http://${HOST}:${vitePort}` } }),
   );
 
-  extra.push("--config", overridePath);
+  // Use the relative path — shell: true on Windows doesn't quote args, so
+  // any spaces in the absolute path (e.g. "Gkey Mover v2") would split it.
+  extra.push("--config", overrideRel);
   env.VITE_PORT = String(vitePort);
   env.VITE_HMR_PORT = String(hmrPort);
 }
