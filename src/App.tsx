@@ -9,14 +9,12 @@ import { EventLog } from "@/components/EventLog";
 import { Sidebar } from "@/components/Sidebar";
 import { TimerDisplay } from "@/components/TimerDisplay";
 import { BottomBar } from "@/components/BottomBar";
-import { SettingsSheet } from "@/components/SettingsSheet";
 import { RenameDialog } from "@/components/RenameDialog";
 import { TitleBar } from "@/components/TitleBar";
 import type { AppConfig } from "@/types";
 
 function App() {
   const [config, setConfig] = useState<AppConfig | null>(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const { entries, clear, restore } = useEventLog();
   useTheme(config);
 
@@ -99,7 +97,7 @@ function App() {
     >
       <TitleBar />
       <div className="flex flex-1 min-h-0">
-        <Sidebar onSettingsClick={() => setSettingsOpen(true)} />
+        <Sidebar />
         <main className="flex-1 flex flex-col min-w-0">
           <EventLog entries={entries} />
           <BottomBar
@@ -116,12 +114,6 @@ function App() {
           running={timer.running}
         />
       </div>
-      <SettingsSheet
-        open={settingsOpen}
-        onOpenChange={setSettingsOpen}
-        config={config}
-        onConfigChange={setConfig}
-      />
       <RenameDialog />
     </div>
   );

@@ -1,5 +1,8 @@
 import type { AppConfig, Theme, ThemeTokens, ThemeTokenKey } from "@/types";
 import { THEME_TOKEN_ORDER } from "@/types";
+import { getSystemMode } from "@/lib/systemTheme";
+
+export const SYSTEM_THEME_ID = "system";
 
 // Mirror of src-tauri/src/theme.rs `builtin_themes`. Must stay in sync.
 export const BUILTIN_THEMES: Theme[] = [
@@ -59,14 +62,29 @@ export const BUILTIN_THEMES: Theme[] = [
   },
 ];
 
+// Pseudo-theme that resolves to Dark or Light based on the OS setting.
+// Tokens match Dark at construction time but are never used directly —
+// resolveTheme() forwards to the real built-in before applying.
+const SYSTEM_PSEUDO_THEME: Theme = {
+  id: SYSTEM_THEME_ID,
+  name: "Match Windows",
+  builtin: true,
+  tokens: { ...BUILTIN_THEMES[0].tokens },
+};
+
 export function allThemes(config: AppConfig | null): Theme[] {
   const customs = config?.themes ?? [];
-  return [...BUILTIN_THEMES, ...customs];
+  return [SYSTEM_PSEUDO_THEME, ...BUILTIN_THEMES, ...customs];
 }
 
 export function resolveTheme(config: AppConfig | null): Theme {
   const id = config?.active_theme_id ?? "dark";
-  const themes = allThemes(config);
+  if (id === SYSTEM_THEME_ID) {
+    const mode = getSystemMode();
+    const targetId = mode === "light" ? "light" : "dark";
+    return BUILTIN_THEMES.find((t) => t.id === targetId) ?? BUILTIN_THEMES[0];
+  }
+  const themes = [...BUILTIN_THEMES, ...(config?.themes ?? [])];
   return themes.find((t) => t.id === id) ?? BUILTIN_THEMES[0];
 }
 

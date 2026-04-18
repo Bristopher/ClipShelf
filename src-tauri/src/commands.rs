@@ -1,4 +1,4 @@
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 
 use crate::config::AppConfig;
 use crate::events::*;
@@ -227,6 +227,70 @@ pub fn open_folder(path: String) -> Result<(), String> {
     opener::open(&path).map_err(|e| e.to_string())
 }
 
+/// Returns the Windows apps theme as "light" or "dark", or `None` if the
+/// platform isn't Windows or the registry read fails/times out.
+///
+/// Uses `spawn_blocking` + 500ms timeout so a hung read can't lock the UI.
+#[tauri::command]
+pub async fn get_system_theme_mode() -> Option<String> {
+    #[cfg(target_os = "windows")]
+    {
+        let handle = tauri::async_runtime::spawn_blocking(read_windows_apps_theme);
+        match tokio::time::timeout(std::time::Duration::from_millis(500), handle).await {
+            Ok(Ok(mode)) => mode,
+            _ => None,
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        None
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn read_windows_apps_theme() -> Option<String> {
+    use std::ptr::null_mut;
+    use windows_sys::Win32::Foundation::ERROR_SUCCESS;
+    use windows_sys::Win32::System::Registry::{
+        RegCloseKey, RegOpenKeyExW, RegQueryValueExW, HKEY, HKEY_CURRENT_USER, KEY_READ,
+    };
+
+    let subkey: Vec<u16> =
+        "Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize\0"
+            .encode_utf16()
+            .collect();
+    let value_name: Vec<u16> = "AppsUseLightTheme\0".encode_utf16().collect();
+
+    unsafe {
+        let mut hkey: HKEY = null_mut();
+        if RegOpenKeyExW(HKEY_CURRENT_USER, subkey.as_ptr(), 0, KEY_READ, &mut hkey)
+            != ERROR_SUCCESS
+        {
+            return None;
+        }
+        let mut value: u32 = 0;
+        let mut size: u32 = std::mem::size_of::<u32>() as u32;
+        let mut ty: u32 = 0;
+        let status = RegQueryValueExW(
+            hkey,
+            value_name.as_ptr(),
+            std::ptr::null_mut(),
+            &mut ty,
+            &mut value as *mut u32 as *mut u8,
+            &mut size,
+        );
+        RegCloseKey(hkey);
+        if status != ERROR_SUCCESS {
+            return None;
+        }
+        if value == 1 {
+            Some("light".into())
+        } else {
+            Some("dark".into())
+        }
+    }
+}
+
 #[tauri::command]
 pub fn import_theme(path: String) -> Result<Theme, String> {
     let contents = std::fs::read_to_string(&path)
@@ -293,6 +357,27 @@ fn slugify(name: &str) -> String {
     } else {
         trimmed
     }
+}
+
+#[tauri::command]
+pub fn open_settings_window(app: AppHandle) -> Result<(), String> {
+    if let Some(existing) = app.get_webview_window("settings") {
+        let _ = existing.unminimize();
+        let _ = existing.show();
+        let _ = existing.set_focus();
+        return Ok(());
+    }
+    let url = WebviewUrl::App("index.html?view=settings".into());
+    WebviewWindowBuilder::new(&app, "settings", url)
+        .title("GKey Mover — Settings")
+        .inner_size(640.0, 720.0)
+        .min_inner_size(500.0, 500.0)
+        .resizable(true)
+        .decorations(true)
+        .center()
+        .build()
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 #[tauri::command]

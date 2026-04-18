@@ -170,6 +170,28 @@
   [role="button"]:not([aria-disabled="true"]) {
     cursor: pointer;
   }
+
+  /* Themed scrollbars — match whatever theme is active. */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: var(--t-app-bg);
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--t-hover-bg);
+    border-radius: 5px;
+    border: 2px solid var(--t-app-bg);
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--t-text-muted);
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-corner {
+    background: var(--t-app-bg);
+  }
 }
 
 /* ── Theme tokens ──

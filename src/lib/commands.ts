@@ -14,3 +14,4 @@ export const resetWindow = () => invoke<void>("reset_window");
 export const importTheme = (path: string) => invoke<Theme>("import_theme", { path });
 export const exportTheme = (path: string, themeId: string) =>
   invoke<void>("export_theme", { path, themeId });
+export const openSettingsWindow = () => invoke<void>("open_settings_window");

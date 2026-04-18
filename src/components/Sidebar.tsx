@@ -1,6 +1,6 @@
 import { Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { pressGkey } from "@/lib/commands";
+import { openSettingsWindow, pressGkey } from "@/lib/commands";
 
 const gkeys = [
   { key: 1, label: "G1", tag: "!!", accent: "var(--t-g1-accent)" },
@@ -9,11 +9,7 @@ const gkeys = [
   { key: 4, label: "G4", tag: "REN", accent: "var(--t-g4-accent)" },
 ] as const;
 
-interface SidebarProps {
-  onSettingsClick: () => void;
-}
-
-export function Sidebar({ onSettingsClick }: SidebarProps) {
+export function Sidebar() {
   return (
     <aside className="w-16 border-r border-t-border flex flex-col gap-1 p-1.5 bg-panel">
       {gkeys.map((g) => (
@@ -32,7 +28,7 @@ export function Sidebar({ onSettingsClick }: SidebarProps) {
         variant="ghost"
         size="icon"
         className="mx-auto h-7 w-7"
-        onClick={onSettingsClick}
+        onClick={() => openSettingsWindow().catch(console.error)}
       >
         <Settings className="h-4 w-4" />
       </Button>

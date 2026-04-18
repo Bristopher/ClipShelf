@@ -21,6 +21,7 @@ import {
   uniqueId,
   uniqueName,
   BUILTIN_THEMES,
+  SYSTEM_THEME_ID,
 } from "@/lib/themes";
 import { exportTheme, importTheme, updateConfig } from "@/lib/commands";
 import {
@@ -44,6 +45,7 @@ type DraftState =
 export function ThemePanel({ config, onConfigChange }: ThemePanelProps) {
   const active = useMemo(() => resolveTheme(config), [config]);
   const [draft, setDraft] = useState<DraftState>({ kind: "clean" });
+  const isSystem = config.active_theme_id === SYSTEM_THEME_ID;
 
   // When user switches active theme, reset any in-flight draft.
   useEffect(() => {
@@ -184,7 +186,7 @@ export function ThemePanel({ config, onConfigChange }: ThemePanelProps) {
       <div className="space-y-1.5">
         <Label className="text-xs">Theme</Label>
         <div className="flex gap-2">
-          <Select value={active.id} onValueChange={onPickTheme}>
+          <Select value={config.active_theme_id} onValueChange={onPickTheme}>
             <SelectTrigger className="h-8 text-xs flex-1">
               <SelectValue />
             </SelectTrigger>
@@ -201,7 +203,7 @@ export function ThemePanel({ config, onConfigChange }: ThemePanelProps) {
             size="icon"
             className="h-8 w-8 shrink-0"
             title="Delete theme"
-            disabled={active.builtin}
+            disabled={active.builtin || isSystem}
             onClick={deleteActive}
           >
             <Trash2 className="h-4 w-4" />
@@ -209,16 +211,34 @@ export function ThemePanel({ config, onConfigChange }: ThemePanelProps) {
         </div>
       </div>
 
+      {isSystem && (
+        <p className="text-[11px] text-t-muted">
+          Following Windows theme. Checked on app start and when settings open.
+        </p>
+      )}
+
       {!editing ? (
         <div className="flex flex-wrap gap-2">
-          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={beginEdit}>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 text-xs"
+            disabled={isSystem}
+            onClick={beginEdit}
+          >
             Edit
           </Button>
           <Button size="sm" variant="outline" className="h-7 text-xs" onClick={doImport}>
             <Upload className="h-3.5 w-3.5 mr-1" />
             Import
           </Button>
-          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={doExport}>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 text-xs"
+            disabled={isSystem}
+            onClick={doExport}
+          >
             <Download className="h-3.5 w-3.5 mr-1" />
             Export
           </Button>

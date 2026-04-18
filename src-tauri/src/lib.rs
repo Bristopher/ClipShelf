@@ -351,6 +351,8 @@ pub fn run() {
             commands::reset_window,
             commands::import_theme,
             commands::export_theme,
+            commands::get_system_theme_mode,
+            commands::open_settings_window,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
