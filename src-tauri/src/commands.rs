@@ -367,7 +367,10 @@ pub fn open_settings_window(app: AppHandle) -> Result<(), String> {
         let _ = existing.set_focus();
         return Ok(());
     }
-    let url = WebviewUrl::App("index.html?view=settings".into());
+    // Route is chosen by the frontend via `getCurrentWindow().label`.
+    // Passing an explicit "index.html" path with a query string confused
+    // Vite's dev server and served a blank page, so keep this plain.
+    let url = WebviewUrl::App("index.html".into());
     WebviewWindowBuilder::new(&app, "settings", url)
         .title("GKey Mover — Settings")
         .inner_size(640.0, 720.0)
