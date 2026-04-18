@@ -1,13 +1,22 @@
-// Wrapper around `tauri dev` that picks a free port at runtime.
-// Windows reserves random high-port ranges for Hyper-V/WSL (see
+// Wrapper for the `tauri` CLI that picks free ports at runtime for `tauri dev`.
+// Reason: Windows reserves random high-port ranges for Hyper-V/WSL (see
 // `netsh interface ipv4 show excludedportrange protocol=tcp`), so a
 // hardcoded port in tauri.conf.json / vite.config.ts can fail with EACCES.
 //
-// We probe for two consecutive free ports (main + HMR), export VITE_PORT
-// for vite.config.ts to read, and override Tauri's devUrl via --config.
+// On `tauri dev` we probe for two free ports (main + HMR), write a
+// temp override config (plain file path avoids Windows quote-mangling),
+// export VITE_PORT / VITE_HMR_PORT for vite.config.ts to read, and run
+// the real tauri CLI with `--config <tempfile>` appended.
+// For any other subcommand (e.g. `tauri build`) we pass args through unchanged.
 
 import net from "node:net";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const ProjectRoot = path.resolve(__dirname, "..");
 
 const HOST = "127.0.0.1";
 const START = Number(process.env.DEV_PORT_START) || 5180;
@@ -29,22 +38,33 @@ async function findPair() {
   throw new Error(`no free port pair found in ${START}..${START + RANGE}`);
 }
 
-const [vitePort, hmrPort] = await findPair();
-console.log(`[dev-tauri] vite=${vitePort} hmr=${hmrPort}`);
+const args = process.argv.slice(2);
+const isDev = args[0] === "dev";
+const env = { ...process.env };
+const extra = [];
 
-const configOverride = JSON.stringify({
-  build: { devUrl: `http://${HOST}:${vitePort}` },
-});
+if (isDev) {
+  const [vitePort, hmrPort] = await findPair();
+  console.log(`[tauri] dev ports: vite=${vitePort} hmr=${hmrPort}`);
 
-const isWin = process.platform === "win32";
-const child = spawn("pnpm", ["tauri", "dev", "--config", configOverride], {
+  const overridePath = path.join(ProjectRoot, "src-tauri", ".tauri.dev.json");
+  fs.writeFileSync(
+    overridePath,
+    JSON.stringify({ build: { devUrl: `http://${HOST}:${vitePort}` } }),
+  );
+
+  extra.push("--config", overridePath);
+  env.VITE_PORT = String(vitePort);
+  env.VITE_HMR_PORT = String(hmrPort);
+}
+
+// Invoke the real tauri CLI. `pnpm exec` resolves the node_modules/.bin
+// binary without re-entering our `tauri` npm script (which would recurse).
+const child = spawn("pnpm", ["exec", "tauri", ...args, ...extra], {
   stdio: "inherit",
-  shell: isWin,
-  env: {
-    ...process.env,
-    VITE_PORT: String(vitePort),
-    VITE_HMR_PORT: String(hmrPort),
-  },
+  shell: process.platform === "win32",
+  env,
+  cwd: ProjectRoot,
 });
 
 child.on("exit", (code) => process.exit(code ?? 0));

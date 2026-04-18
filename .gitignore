@@ -12,6 +12,7 @@ dist/
 dist-ssr/
 target/
 .vite/
+src-tauri/.tauri.dev.json
 *.local
 *.exe
 _hold/
