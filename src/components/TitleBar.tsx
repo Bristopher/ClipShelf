@@ -3,6 +3,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getVersion } from "@tauri-apps/api/app";
 import { Minus, Square, X } from "lucide-react";
 import { resetWindow } from "@/lib/commands";
+import logoUrl from "@/assets/gkey-logo.png";
 
 const appWindow = getCurrentWindow();
 
@@ -36,7 +37,12 @@ export function TitleBar() {
       onMouseDown={startDrag}
       className="relative h-7 flex items-center justify-between bg-title-bar border-b border-t-border select-none shrink-0 cursor-default"
     >
-      <div className="flex items-center gap-2 pl-3 flex-1 relative">
+      <div className="flex items-center gap-2 pl-2 flex-1 relative">
+        <img
+          src={logoUrl}
+          alt=""
+          className="h-4 w-4 rounded-sm pointer-events-none shrink-0"
+        />
         <span
           onMouseEnter={() => onEnter("title")}
           onMouseLeave={onLeave}

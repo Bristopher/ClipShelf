@@ -94,6 +94,35 @@ export function applyTheme(theme: Theme) {
     const cssName = `--t-${key.replace(/_/g, "-")}`;
     root.style.setProperty(cssName, theme.tokens[key]);
   }
+  // Cache resolved bg+text so the next app open can paint the current theme
+  // immediately via the inline script in index.html, avoiding any flash.
+  try {
+    const bg = resolveCssColor(theme.tokens.app_bg);
+    const text = resolveCssColor(theme.tokens.text);
+    if (bg && text) {
+      localStorage.setItem("gkey-theme-paint", JSON.stringify({ bg, text }));
+    }
+  } catch {
+    /* noop */
+  }
+}
+
+/**
+ * Resolves any valid CSS color string ("oklch(...)", "#abc", "rgba(...)") to
+ * a concrete hex/rgb string via the browser's own parser. Needed because
+ * the inline script in index.html must hand the color to CSS without
+ * re-running through the full theming pipeline.
+ */
+function resolveCssColor(color: string): string | null {
+  const canvas = document.createElement("canvas");
+  canvas.width = 1;
+  canvas.height = 1;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  ctx.fillStyle = "#000";
+  ctx.fillStyle = color;
+  const out = ctx.fillStyle.toString();
+  return out || null;
 }
 
 export function slugify(name: string): string {

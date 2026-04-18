@@ -1,3 +1,4 @@
+use tauri::window::Color;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 
 use crate::config::AppConfig;
@@ -51,9 +52,15 @@ pub fn press_gkey(key: u8, state: State<'_, AppState>, app: AppHandle) -> Result
     let current = match &s.current_file {
         Some(cf) => cf.clone(),
         None => {
-            let entry = s
-                .logger
-                .log(LogLevel::Error, "No current_file".into(), LogCategory::System);
+            let msg = if s.config.videos_folder.is_empty() {
+                "No videos folder configured — open Settings and pick your OBS/ShadowPlay clips folder.".to_string()
+            } else {
+                format!(
+                    "No clip detected for {} — is OBS/ShadowPlay running? Check that clips save to: {}",
+                    gkey_label, s.config.videos_folder
+                )
+            };
+            let entry = s.logger.log(LogLevel::Error, msg, LogCategory::System);
             let _ = app.emit("log-entry", &entry);
             if s.config.error_sound_enabled {
                 let resource_dir = app.path().resource_dir().unwrap_or_default();
@@ -367,17 +374,28 @@ pub fn open_settings_window(app: AppHandle) -> Result<(), String> {
         let _ = existing.set_focus();
         return Ok(());
     }
-    // Route is chosen by the frontend via `getCurrentWindow().label`.
-    // Passing an explicit "index.html" path with a query string confused
-    // Vite's dev server and served a blank page, so keep this plain.
-    let url = WebviewUrl::App("index.html".into());
-    WebviewWindowBuilder::new(&app, "settings", url)
+    // Reuse the main window's already-resolved URL. Using WebviewUrl::App
+    // with a path was not loading in dev (blank, frozen webview), likely
+    // because the dynamic devUrl override didn't propagate to the second
+    // window. External URL from the main webview dodges the whole
+    // resolution path.
+    let main_url = app
+        .get_webview_window("main")
+        .ok_or_else(|| "main window not found".to_string())?
+        .url()
+        .map_err(|e| e.to_string())?;
+
+    WebviewWindowBuilder::new(&app, "settings", WebviewUrl::External(main_url))
         .title("GKey Mover — Settings")
         .inner_size(640.0, 720.0)
         .min_inner_size(500.0, 500.0)
         .resizable(true)
         .decorations(true)
         .center()
+        // Native-frame color before the webview paints — dark so it blends
+        // with the dark-default theme. Once the webview loads, its inline
+        // script in index.html paints the user's last-used theme color.
+        .background_color(Color(10, 10, 10, 255))
         .build()
         .map_err(|e| e.to_string())?;
     Ok(())

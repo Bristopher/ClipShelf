@@ -11,6 +11,7 @@ import { TimerDisplay } from "@/components/TimerDisplay";
 import { BottomBar } from "@/components/BottomBar";
 import { RenameDialog } from "@/components/RenameDialog";
 import { TitleBar } from "@/components/TitleBar";
+import { FirstRunDialog } from "@/components/FirstRunDialog";
 import type { AppConfig } from "@/types";
 
 function App() {
@@ -115,6 +116,9 @@ function App() {
         />
       </div>
       <RenameDialog />
+      {!config.videos_folder && (
+        <FirstRunDialog config={config} onConfigChange={setConfig} />
+      )}
     </div>
   );
 }
