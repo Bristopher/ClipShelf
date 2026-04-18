@@ -14,6 +14,28 @@ import { TitleBar } from "@/components/TitleBar";
 import { openFirstRunWindow } from "@/lib/commands";
 import type { AppConfig } from "@/types";
 
+// Short tone played when user clicks the locked main area while first-run
+// setup is still pending — analogous to the Windows dialog "ding".
+function playBeep() {
+  try {
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.type = "sine";
+    osc.frequency.value = 520;
+    gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.2, ctx.currentTime + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.18);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.2);
+    osc.onended = () => ctx.close();
+  } catch {
+    /* no audio available */
+  }
+}
+
 function App() {
   const [config, setConfig] = useState<AppConfig | null>(null);
   const { entries, clear, restore } = useEventLog();
@@ -104,7 +126,7 @@ function App() {
       onMouseLeave={handleMouseLeave}
     >
       <TitleBar />
-      <div className="flex flex-1 min-h-0">
+      <div className="flex flex-1 min-h-0 relative">
         <Sidebar />
         <main className="flex-1 flex flex-col min-w-0">
           <EventLog entries={entries} />
@@ -121,6 +143,21 @@ function App() {
           totalSecs={timer.totalSecs}
           running={timer.running}
         />
+        {!config.videos_folder && (
+          <div
+            className="absolute inset-0 z-40 bg-black/55 backdrop-blur-[1px] cursor-not-allowed flex items-center justify-center"
+            onMouseDownCapture={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              playBeep();
+              openFirstRunWindow().catch(console.error);
+            }}
+          >
+            <div className="pointer-events-none text-t-text text-xs font-semibold px-3 py-1.5 rounded bg-panel/80 border border-t-border shadow-lg">
+              Finish setup first →
+            </div>
+          </div>
+        )}
       </div>
       <RenameDialog />
     </div>

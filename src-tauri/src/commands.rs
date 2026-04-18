@@ -387,6 +387,8 @@ pub fn open_first_run_window(app: AppHandle) -> Result<(), String> {
         let _ = existing.center();
         let _ = existing.show();
         let _ = existing.set_focus();
+        // Flash the taskbar entry so users realize setup is pending.
+        let _ = existing.request_user_attention(Some(tauri::UserAttentionType::Critical));
         return Ok(());
     }
     Err("first-run window was not pre-created at startup".into())
