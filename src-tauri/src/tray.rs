@@ -12,8 +12,14 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 
     let menu = Menu::with_items(app, &[&videos_item, &log_item, &help_item, &quit_item])?;
 
+    let icon = app
+        .default_window_icon()
+        .cloned()
+        .ok_or("default window icon not available")?;
+
     TrayIconBuilder::new()
-        .tooltip("Gkey Mover v2.0.0")
+        .icon(icon)
+        .tooltip("GKey Mover v2.0.1")
         .menu(&menu)
         .on_menu_event(|app, event| {
             match event.id().as_ref() {
