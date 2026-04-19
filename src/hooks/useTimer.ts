@@ -25,6 +25,16 @@ export function useTimer(
     running: false,
   });
 
+  // Re-sync to the configured duration when it changes (config load,
+  // settings edit) — but don't clobber a running countdown mid-tick.
+  useEffect(() => {
+    setState((prev) =>
+      prev.running
+        ? prev
+        : { remainingSecs: initialTotalSecs, totalSecs: initialTotalSecs, running: false },
+    );
+  }, [initialTotalSecs]);
+
   useEffect(() => {
     const unlistenTick = listen<TimerTick>(tickEvent, (event) => {
       setState({
@@ -34,7 +44,9 @@ export function useTimer(
       });
     });
     const unlistenExpired = listen(expiredEvent, () => {
-      setState((prev) => ({ ...prev, remainingSecs: 0, running: false }));
+      // Snap back to full duration so the display reads the next
+      // countdown's starting value instead of freezing at 00:00.
+      setState((prev) => ({ ...prev, remainingSecs: prev.totalSecs, running: false }));
     });
     return () => {
       unlistenTick.then((fn) => fn());
