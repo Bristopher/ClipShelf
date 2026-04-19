@@ -91,8 +91,21 @@ pub fn run() {
                 log::error!("Failed to set up system tray: {}", e);
             }
 
-            // Spawn timer
-            let timer_tx = timer::spawn_timer(app_handle.clone());
+            // Spawn two independent timers:
+            //   - `timer_tx`: auto-wipe timer that fires when a new clip
+            //     arrives (events `timer-tick` / `timer-expired`).
+            //   - `user_timer_tx`: manual countdown triggered from the UI
+            //     Start button (events `user-timer-tick` /
+            //     `user-timer-expired`). Runs independently so a user can
+            //     time their replay-buffer save without colliding with
+            //     a clip-arrival countdown.
+            let timer_tx =
+                timer::spawn_timer(app_handle.clone(), "timer-tick", "timer-expired");
+            let user_timer_tx = timer::spawn_timer(
+                app_handle.clone(),
+                "user-timer-tick",
+                "user-timer-expired",
+            );
 
             // Spawn file watcher
             let (watcher_tx, mut watcher_rx) = watcher::spawn_watcher();
@@ -100,6 +113,7 @@ pub fn run() {
             // Create ChannelState
             let channel_state = ChannelState {
                 timer_tx: timer_tx.clone(),
+                user_timer_tx: user_timer_tx.clone(),
                 watcher_tx: watcher_tx.clone(),
             };
             app.manage(channel_state);
@@ -431,7 +445,8 @@ pub fn run() {
             commands::get_system_theme_mode,
             commands::open_settings_window,
             commands::open_first_run_window,
-            commands::start_timer,
+            commands::start_user_timer,
+            commands::reset_user_timer,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {

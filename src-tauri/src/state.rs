@@ -44,5 +44,6 @@ pub type AppState = Arc<Mutex<AppStateInner>>;
 /// Holds the tokio channel senders for background tasks.
 pub struct ChannelState {
     pub timer_tx: mpsc::Sender<TimerCommand>,
+    pub user_timer_tx: mpsc::Sender<TimerCommand>,
     pub watcher_tx: mpsc::Sender<WatcherCommand>,
 }

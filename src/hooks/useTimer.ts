@@ -1,9 +1,24 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { EVENTS } from "@/lib/events";
 import type { TimerTick } from "@/types";
 
-export function useTimer(initialTotalSecs: number) {
+interface UseTimerOpts {
+  tickEvent?: string;
+  expiredEvent?: string;
+}
+
+/**
+ * Subscribes to a single Rust-side timer instance. Two are running:
+ *   - default (`timer-tick` / `timer-expired`) → auto-wipe on file arrival
+ *   - user (`user-timer-tick` / `user-timer-expired`) → manual countdown
+ */
+export function useTimer(
+  initialTotalSecs: number,
+  opts: UseTimerOpts = {},
+) {
+  const tickEvent = opts.tickEvent ?? "timer-tick";
+  const expiredEvent = opts.expiredEvent ?? "timer-expired";
+
   const [state, setState] = useState({
     remainingSecs: initialTotalSecs,
     totalSecs: initialTotalSecs,
@@ -11,21 +26,21 @@ export function useTimer(initialTotalSecs: number) {
   });
 
   useEffect(() => {
-    const unlistenTick = listen<TimerTick>(EVENTS.TIMER_TICK, (event) => {
+    const unlistenTick = listen<TimerTick>(tickEvent, (event) => {
       setState({
         remainingSecs: event.payload.remainingSecs,
         totalSecs: event.payload.totalSecs,
         running: event.payload.remainingSecs > 0,
       });
     });
-    const unlistenExpired = listen(EVENTS.TIMER_EXPIRED, () => {
-      setState((prev) => ({ ...prev, remainingSecs: prev.totalSecs, running: false }));
+    const unlistenExpired = listen(expiredEvent, () => {
+      setState((prev) => ({ ...prev, remainingSecs: 0, running: false }));
     });
     return () => {
       unlistenTick.then((fn) => fn());
       unlistenExpired.then((fn) => fn());
     };
-  }, []);
+  }, [tickEvent, expiredEvent]);
 
   return state;
 }

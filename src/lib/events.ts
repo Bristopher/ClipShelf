@@ -6,6 +6,8 @@ export const EVENTS = {
   HOTKEY_TRIGGERED: "hotkey-triggered",
   TIMER_TICK: "timer-tick",
   TIMER_EXPIRED: "timer-expired",
+  USER_TIMER_TICK: "user-timer-tick",
+  USER_TIMER_EXPIRED: "user-timer-expired",
   LOG_ENTRY: "log-entry",
   WATCHER_STATUS: "watcher-status",
   OBS_WS_STATUS: "obs-ws-status",

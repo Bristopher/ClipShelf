@@ -10,9 +10,18 @@ pub enum TimerCommand {
     Reset { duration_secs: u32 },
 }
 
-/// Spawn a timer task that listens for commands and emits tick events.
-/// Returns a sender for sending commands to the timer.
-pub fn spawn_timer(app_handle: AppHandle) -> mpsc::Sender<TimerCommand> {
+/// Spawn a timer task that listens for commands and emits tick events
+/// under the given event names. Returns a sender for commands.
+///
+/// Two instances are spawned in `lib.rs`: one drives auto-wipe on file
+/// arrival (events `timer-tick` / `timer-expired`), and a second drives
+/// the manual Start button (`user-timer-tick` / `user-timer-expired`)
+/// so users can run a prep countdown independently of the auto-wipe.
+pub fn spawn_timer(
+    app_handle: AppHandle,
+    tick_event: &'static str,
+    expired_event: &'static str,
+) -> mpsc::Sender<TimerCommand> {
     let (tx, mut rx) = mpsc::channel::<TimerCommand>(32);
 
     tauri::async_runtime::spawn(async move {
@@ -29,6 +38,10 @@ pub fn spawn_timer(app_handle: AppHandle) -> mpsc::Sender<TimerCommand> {
                             total_secs = duration_secs;
                             remaining = duration_secs;
                             running = true;
+                            let _ = app_handle.emit(tick_event, TimerTickPayload {
+                                remaining_secs: remaining,
+                                total_secs,
+                            });
                         }
                         Some(TimerCommand::Stop) => {
                             running = false;
@@ -37,7 +50,7 @@ pub fn spawn_timer(app_handle: AppHandle) -> mpsc::Sender<TimerCommand> {
                             total_secs = duration_secs;
                             remaining = duration_secs;
                             running = false;
-                            let _ = app_handle.emit("timer-tick", TimerTickPayload {
+                            let _ = app_handle.emit(tick_event, TimerTickPayload {
                                 remaining_secs: remaining,
                                 total_secs,
                             });
@@ -48,14 +61,14 @@ pub fn spawn_timer(app_handle: AppHandle) -> mpsc::Sender<TimerCommand> {
                 _ = tick_interval.tick(), if running => {
                     if remaining > 0 {
                         remaining -= 1;
-                        let _ = app_handle.emit("timer-tick", TimerTickPayload {
+                        let _ = app_handle.emit(tick_event, TimerTickPayload {
                             remaining_secs: remaining,
                             total_secs,
                         });
                     }
                     if remaining == 0 && running {
                         running = false;
-                        let _ = app_handle.emit("timer-expired", ());
+                        let _ = app_handle.emit(expired_event, ());
                     }
                 }
             }

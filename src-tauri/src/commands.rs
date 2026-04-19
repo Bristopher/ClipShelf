@@ -223,12 +223,11 @@ pub fn restore_log(state: State<'_, AppState>) -> Result<Vec<LogEntryPayload>, S
     Ok(s.logger.restore_display())
 }
 
-/// Manually start the countdown timer with the configured duration.
-/// Useful when you want to know when to hit Save Replay Buffer — press
-/// the Start button when the in-game action begins, then press Save
-/// before the timer hits zero.
+/// Starts the user-triggered countdown timer. Independent from the
+/// auto-wipe timer — this one exists so users can time their OBS "Save
+/// Replay Buffer" press without interfering with file-arrival wiping.
 #[tauri::command]
-pub fn start_timer(
+pub fn start_user_timer(
     duration_secs: Option<u32>,
     state: State<'_, AppState>,
     channels: State<'_, ChannelState>,
@@ -238,14 +237,28 @@ pub fn start_timer(
         s.config.timer_duration_secs() as u32
     });
     channels
-        .timer_tx
+        .user_timer_tx
         .try_send(TimerCommand::Start { duration_secs: duration })
-        .map_err(|e| format!("Failed to start timer: {}", e))?;
-    {
-        let mut s = state.lock().map_err(|e| e.to_string())?;
-        s.timer_running = true;
-    }
-    Ok(())
+        .map_err(|e| format!("Failed to start user timer: {}", e))
+}
+
+/// Resets the user-triggered countdown back to its full duration and
+/// stops it. Emits a final `user-timer-tick` so the UI updates to the
+/// reset value. Leaves the auto-wipe timer untouched.
+#[tauri::command]
+pub fn reset_user_timer(
+    duration_secs: Option<u32>,
+    state: State<'_, AppState>,
+    channels: State<'_, ChannelState>,
+) -> Result<(), String> {
+    let duration = duration_secs.unwrap_or_else(|| {
+        let s = state.lock().expect("state lock poisoned");
+        s.config.timer_duration_secs() as u32
+    });
+    channels
+        .user_timer_tx
+        .try_send(TimerCommand::Reset { duration_secs: duration })
+        .map_err(|e| format!("Failed to reset user timer: {}", e))
 }
 
 #[tauri::command]
