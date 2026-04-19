@@ -2,7 +2,8 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { wipeLog, restoreLog } from "@/lib/commands";
+import { Timer } from "lucide-react";
+import { wipeLog, restoreLog, startTimer } from "@/lib/commands";
 import type { LogEntry } from "@/types";
 
 interface BottomBarProps {
@@ -43,6 +44,16 @@ export function BottomBar({
       </Button>
       <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={handleRestore}>
         Restore
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-7 text-xs gap-1"
+        onClick={() => startTimer().catch(console.error)}
+        title="Start the auto-wipe countdown (tells you when to hit Save Replay)"
+      >
+        <Timer className="h-3.5 w-3.5" />
+        Start
       </Button>
 
       <Separator orientation="vertical" className="h-4" />

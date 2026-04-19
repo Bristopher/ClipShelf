@@ -431,6 +431,7 @@ pub fn run() {
             commands::get_system_theme_mode,
             commands::open_settings_window,
             commands::open_first_run_window,
+            commands::start_timer,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {

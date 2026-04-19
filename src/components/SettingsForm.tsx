@@ -182,18 +182,26 @@ export function SettingsForm({ config, onConfigChange }: SettingsFormProps) {
       <Separator />
 
       <section className="space-y-3">
-        <h3 className="text-sm font-semibold">Timer</h3>
+        <h3 className="text-sm font-semibold">Timer / Auto-Wipe</h3>
+        <p className="text-[10px] text-t-muted">
+          When a clip arrives (or you hit Start), a countdown runs. Match this
+          to your OBS replay-buffer length so you know when to press save.
+        </p>
         <div className="flex items-center justify-between">
-          <Label className="text-xs">Enabled</Label>
+          <Label className="text-xs">Timer enabled</Label>
           <Switch
             checked={config.timer_enabled}
             onCheckedChange={(v) => update({ timer_enabled: v })}
           />
         </div>
         <div className="space-y-1">
-          <Label className="text-xs">Duration (seconds)</Label>
+          <Label className="text-xs">
+            Auto-wipe time ({Math.floor(config.timer_duration_ms / 1000)}s)
+          </Label>
           <Input
             type="number"
+            min={5}
+            max={3600}
             value={Math.floor(config.timer_duration_ms / 1000)}
             className="text-xs h-8"
             onChange={(e) =>
@@ -202,7 +210,7 @@ export function SettingsForm({ config, onConfigChange }: SettingsFormProps) {
           />
         </div>
         <div className="flex items-center justify-between">
-          <Label className="text-xs">Auto-Wipe on Expiry</Label>
+          <Label className="text-xs">Auto-wipe event log on expiry</Label>
           <Switch
             checked={config.auto_wipe_enabled}
             onCheckedChange={(v) => update({ auto_wipe_enabled: v })}

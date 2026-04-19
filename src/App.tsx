@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getConfig, updateConfig, pressGkey, setWindowOpacity } from "@/lib/commands";
 import { EVENTS } from "@/lib/events";
@@ -68,18 +68,22 @@ function App() {
     };
   }, []);
 
-  // Auto-wipe on timer expiry
-  const clearRef = useCallback(clear, [clear]);
+  // Auto-wipe on timer expiry — listener mounts once; config + clear are
+  // read via refs so we don't re-register on every render.
+  const autoWipeRef = useRef(false);
+  autoWipeRef.current = !!config?.auto_wipe_enabled;
+  const clearRef = useRef(clear);
+  clearRef.current = clear;
   useEffect(() => {
     const unlisten = listen(EVENTS.TIMER_EXPIRED, () => {
-      if (config?.auto_wipe_enabled) {
-        clearRef();
+      if (autoWipeRef.current) {
+        clearRef.current();
       }
     });
     return () => {
       unlisten.then((fn) => fn());
     };
-  }, [config?.auto_wipe_enabled, clearRef]);
+  }, []);
 
   // Apply window opacity when config loads or changes
   useEffect(() => {

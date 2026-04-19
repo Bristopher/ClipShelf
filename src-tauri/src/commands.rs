@@ -7,6 +7,7 @@ use crate::mover;
 use crate::sound;
 use crate::state::{AppState, ChannelState, CurrentFile};
 use crate::theme::{Theme, ThemeExport, THEME_SCHEMA};
+use crate::timer::TimerCommand;
 use crate::watcher::WatcherCommand;
 
 #[tauri::command]
@@ -220,6 +221,31 @@ pub fn wipe_log(state: State<'_, AppState>) -> Result<(), String> {
 pub fn restore_log(state: State<'_, AppState>) -> Result<Vec<LogEntryPayload>, String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     Ok(s.logger.restore_display())
+}
+
+/// Manually start the countdown timer with the configured duration.
+/// Useful when you want to know when to hit Save Replay Buffer — press
+/// the Start button when the in-game action begins, then press Save
+/// before the timer hits zero.
+#[tauri::command]
+pub fn start_timer(
+    duration_secs: Option<u32>,
+    state: State<'_, AppState>,
+    channels: State<'_, ChannelState>,
+) -> Result<(), String> {
+    let duration = duration_secs.unwrap_or_else(|| {
+        let s = state.lock().expect("state lock poisoned");
+        s.config.timer_duration_secs() as u32
+    });
+    channels
+        .timer_tx
+        .try_send(TimerCommand::Start { duration_secs: duration })
+        .map_err(|e| format!("Failed to start timer: {}", e))?;
+    {
+        let mut s = state.lock().map_err(|e| e.to_string())?;
+        s.timer_running = true;
+    }
+    Ok(())
 }
 
 #[tauri::command]

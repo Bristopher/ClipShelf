@@ -16,3 +16,5 @@ export const exportTheme = (path: string, themeId: string) =>
   invoke<void>("export_theme", { path, themeId });
 export const openSettingsWindow = () => invoke<void>("open_settings_window");
 export const openFirstRunWindow = () => invoke<void>("open_first_run_window");
+export const startTimer = (durationSecs?: number) =>
+  invoke<void>("start_timer", { durationSecs });
