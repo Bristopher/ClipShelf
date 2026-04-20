@@ -80,6 +80,7 @@ export interface AppConfig {
   active_theme_id: string;
   themes: Theme[];
   save_clip_bind: string;
+  timer_flash_enabled: boolean;
 }
 
 export interface LogEntry {

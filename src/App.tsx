@@ -114,6 +114,24 @@ function App() {
 
   const initialSecs = config ? Math.floor(config.timer_duration_ms / 1000) : 70;
   const timer = useTimer(initialSecs);
+  const userTimer = useTimer(initialSecs, {
+    tickEvent: EVENTS.USER_TIMER_TICK,
+    expiredEvent: EVENTS.USER_TIMER_EXPIRED,
+  });
+
+  // Flash the whole window with inverted colors each second once either
+  // countdown is at 5s or fewer — opt-out via `timer_flash_enabled`. Parity
+  // of the remaining-seconds integer drives the toggle (ticks arrive every
+  // 1s so the class flips every tick).
+  const flashOn = (() => {
+    if (!config?.timer_flash_enabled) return false;
+    const t = timer.running && timer.remainingSecs > 0 && timer.remainingSecs <= 5
+      ? timer.remainingSecs
+      : userTimer.running && userTimer.remainingSecs > 0 && userTimer.remainingSecs <= 5
+        ? userTimer.remainingSecs
+        : 0;
+    return t > 0 && t % 2 === 1;
+  })();
 
   if (!config) {
     return (
@@ -128,6 +146,7 @@ function App() {
       className="flex flex-col h-screen"
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
+      style={flashOn ? { filter: "invert(1) hue-rotate(180deg)" } : undefined}
     >
       <TitleBar />
       <div className="flex flex-1 min-h-0 relative">

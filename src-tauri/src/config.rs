@@ -35,6 +35,7 @@ fn default_hover_full_opacity() -> bool { true }
 fn default_active_theme_id() -> String { "dark".to_string() }
 fn default_themes() -> Vec<Theme> { Vec::new() }
 fn default_save_clip_bind() -> String { "".to_string() }
+fn default_timer_flash_enabled() -> bool { true }
 
 // --- AppConfig struct ---
 
@@ -133,6 +134,11 @@ pub struct AppConfig {
     /// arrived" errors in the event log.
     #[serde(default = "default_save_clip_bind")]
     pub save_clip_bind: String,
+
+    /// When true, flash the whole window with inverted colors every second
+    /// once the countdown drops to 5 or fewer seconds — very hard to miss.
+    #[serde(default = "default_timer_flash_enabled")]
+    pub timer_flash_enabled: bool,
 }
 
 impl Default for AppConfig {
@@ -168,6 +174,7 @@ impl Default for AppConfig {
             active_theme_id: default_active_theme_id(),
             themes: default_themes(),
             save_clip_bind: default_save_clip_bind(),
+            timer_flash_enabled: default_timer_flash_enabled(),
         }
     }
 }

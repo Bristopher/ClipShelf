@@ -216,6 +216,19 @@ export function SettingsForm({ config, onConfigChange }: SettingsFormProps) {
             onCheckedChange={(v) => update({ auto_wipe_enabled: v })}
           />
         </div>
+        <div className="flex items-center justify-between">
+          <div className="pr-2">
+            <Label className="text-xs">Flash window at ≤ 5s left</Label>
+            <p className="text-[10px] text-t-muted">
+              Inverts the theme once per second so it's obvious the timer is
+              about to expire.
+            </p>
+          </div>
+          <Switch
+            checked={config.timer_flash_enabled}
+            onCheckedChange={(v) => update({ timer_flash_enabled: v })}
+          />
+        </div>
       </section>
 
       <Separator />
