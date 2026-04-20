@@ -20,13 +20,32 @@ pub fn get_config(state: State<'_, AppState>) -> Result<AppConfig, String> {
 pub fn update_config(
     partial: serde_json::Value,
     state: State<'_, AppState>,
+    channels: State<'_, ChannelState>,
     app: AppHandle,
 ) -> Result<AppConfig, String> {
+    let prev_folder = {
+        let s = state.lock().map_err(|e| e.to_string())?;
+        s.config.videos_folder.clone()
+    };
+
     let mut s = state.lock().map_err(|e| e.to_string())?;
     s.config.merge_partial(partial);
     let path = s.config_path.clone();
     s.config.save_to(&path).map_err(|e| e.to_string())?;
     let config = s.config.clone();
+    drop(s);
+
+    // If the videos folder changed (including the first-run case where it
+    // was empty at startup and is now set), (re)start the file watcher —
+    // otherwise new clips are never seen until app restart.
+    if config.videos_folder != prev_folder && !config.videos_folder.is_empty() {
+        let path = std::path::PathBuf::from(&config.videos_folder);
+        let watcher_tx = channels.watcher_tx.clone();
+        tauri::async_runtime::spawn(async move {
+            let _ = watcher_tx.send(WatcherCommand::Start { path }).await;
+        });
+    }
+
     let _ = app.emit("config-changed", &config);
     Ok(config)
 }
