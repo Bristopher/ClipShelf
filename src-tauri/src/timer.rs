@@ -1,6 +1,6 @@
 use tauri::{AppHandle, Emitter};
 use tokio::sync::mpsc;
-use tokio::time::{interval, Duration};
+use tokio::time::{interval, Duration, MissedTickBehavior};
 
 use crate::events::TimerTickPayload;
 
@@ -29,6 +29,12 @@ pub fn spawn_timer(
         let mut remaining: u32 = 0;
         let mut running = false;
         let mut tick_interval = interval(Duration::from_secs(1));
+        // Without this, the interval's default `Burst` behavior would fire
+        // every "missed" tick back-to-back the moment `running` flips true
+        // — meaning if the task sat idle for 70+ seconds before the first
+        // clip arrived, the countdown would drain in a single event-loop
+        // iteration and `timer-expired` would fire immediately.
+        tick_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
         loop {
             tokio::select! {
