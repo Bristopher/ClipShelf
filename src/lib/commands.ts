@@ -20,3 +20,6 @@ export const startUserTimer = (durationSecs?: number) =>
   invoke<void>("start_user_timer", { durationSecs });
 export const resetUserTimer = (durationSecs?: number) =>
   invoke<void>("reset_user_timer", { durationSecs });
+export const startCalibration = (targetSamples: number) =>
+  invoke<void>("start_calibration", { targetSamples });
+export const cancelCalibration = () => invoke<void>("cancel_calibration");

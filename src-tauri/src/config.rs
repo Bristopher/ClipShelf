@@ -36,6 +36,7 @@ fn default_active_theme_id() -> String { "dark".to_string() }
 fn default_themes() -> Vec<Theme> { Vec::new() }
 fn default_save_clip_bind() -> String { "".to_string() }
 fn default_timer_flash_enabled() -> bool { true }
+fn default_save_clip_health_check_timeout_secs() -> u32 { 5 }
 
 // --- AppConfig struct ---
 
@@ -139,6 +140,13 @@ pub struct AppConfig {
     /// once the countdown drops to 5 or fewer seconds — very hard to miss.
     #[serde(default = "default_timer_flash_enabled")]
     pub timer_flash_enabled: bool,
+
+    /// How long to wait after the user presses `save_clip_bind` before
+    /// declaring the watcher unhealthy and rescanning the folder. Hardware-
+    /// dependent: SSDs flush in ~1s, slow HDDs or long replay buffers can
+    /// take 5-10s. Use the calibration tool in settings to measure yours.
+    #[serde(default = "default_save_clip_health_check_timeout_secs")]
+    pub save_clip_health_check_timeout_secs: u32,
 }
 
 impl Default for AppConfig {
@@ -175,6 +183,7 @@ impl Default for AppConfig {
             themes: default_themes(),
             save_clip_bind: default_save_clip_bind(),
             timer_flash_enabled: default_timer_flash_enabled(),
+            save_clip_health_check_timeout_secs: default_save_clip_health_check_timeout_secs(),
         }
     }
 }

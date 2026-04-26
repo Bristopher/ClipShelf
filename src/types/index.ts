@@ -81,6 +81,18 @@ export interface AppConfig {
   themes: Theme[];
   save_clip_bind: string;
   timer_flash_enabled: boolean;
+  save_clip_health_check_timeout_secs: number;
+}
+
+export interface CalibrationSampleEvent {
+  kind: "sample" | "complete";
+  filename: string;
+  deltaMs: number;
+  index: number;
+  target: number;
+  averageMs?: number;
+  worstMs?: number;
+  bestMs?: number;
 }
 
 export interface LogEntry {

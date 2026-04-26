@@ -288,6 +288,36 @@ pub fn restart_watcher(channels: State<'_, ChannelState>) -> Result<(), String> 
         .map_err(|e| format!("Failed to send restart command: {}", e))
 }
 
+/// Begin a save-clip latency calibration session. The user will press their
+/// `save_clip_bind` `target_samples` times; each press → file-arrival delta
+/// is recorded and emitted as a `calibration-event` with kind `"sample"`.
+/// After the final sample, kind flips to `"complete"` with average / worst
+/// / best in milliseconds.
+#[tauri::command]
+pub fn start_calibration(
+    target_samples: usize,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    if s.config.save_clip_bind.is_empty() {
+        return Err("Set a save-clip hotkey first".to_string());
+    }
+    s.calibration.active = true;
+    s.calibration.target_samples = target_samples.clamp(1, 50);
+    s.calibration.pending_save_at = None;
+    s.calibration.samples.clear();
+    Ok(())
+}
+
+#[tauri::command]
+pub fn cancel_calibration(state: State<'_, AppState>) -> Result<(), String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    s.calibration.active = false;
+    s.calibration.pending_save_at = None;
+    s.calibration.samples.clear();
+    Ok(())
+}
+
 #[tauri::command]
 pub fn open_folder(path: String) -> Result<(), String> {
     opener::open(&path).map_err(|e| e.to_string())

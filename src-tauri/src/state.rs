@@ -28,6 +28,25 @@ pub struct AppStateInner {
     /// the user pressed their capture-app hotkey to decide whether the
     /// watcher is alive.
     pub last_file_created_at: Option<SystemTime>,
+
+    /// Calibration mode: when active, each `save_clip_bind` press records
+    /// the next `FileCreated` arrival time and emits a sample to the UI so
+    /// the user can pick a sensible `save_clip_health_check_timeout_secs`.
+    pub calibration: CalibrationState,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct CalibrationState {
+    pub active: bool,
+    pub target_samples: usize,
+    pub pending_save_at: Option<SystemTime>,
+    pub samples: Vec<CalibrationSample>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CalibrationSample {
+    pub filename: String,
+    pub delta_ms: u64,
 }
 
 impl AppStateInner {
@@ -42,6 +61,7 @@ impl AppStateInner {
             watcher_restart_count: 0,
             timer_running: false,
             last_file_created_at: None,
+            calibration: CalibrationState::default(),
         }
     }
 }

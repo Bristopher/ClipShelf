@@ -272,6 +272,24 @@ pub fn run() {
                                             .await;
                                     }
                                     HotkeyAction::SaveClipHealthCheck => {
+                                        // Arm calibration if active so the next
+                                        // FileCreated can compute its delta.
+                                        let calibrating = {
+                                            let mut s = state.lock().unwrap();
+                                            if s.calibration.active {
+                                                s.calibration.pending_save_at =
+                                                    Some(std::time::SystemTime::now());
+                                                true
+                                            } else {
+                                                false
+                                            }
+                                        };
+                                        if calibrating {
+                                            let _ = app_handle.emit(
+                                                "calibration-armed",
+                                                serde_json::json!({}),
+                                            );
+                                        }
                                         spawn_save_clip_health_check(
                                             app_handle.clone(),
                                             state.clone(),
@@ -483,6 +501,8 @@ pub fn run() {
             commands::open_first_run_window,
             commands::start_user_timer,
             commands::reset_user_timer,
+            commands::start_calibration,
+            commands::cancel_calibration,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
@@ -516,7 +536,7 @@ async fn handle_file_created(
     let timestamp = parse_time_from_filename(&filename);
 
     // Update state
-    {
+    let calibration_event: Option<serde_json::Value> = {
         let mut s = state.lock().unwrap();
         s.current_file = Some(CurrentFile {
             path: path.clone(),
@@ -524,7 +544,76 @@ async fn handle_file_created(
             renamed: false,
         });
         s.bind_chosen = None;
-        s.last_file_created_at = Some(std::time::SystemTime::now());
+        let now = std::time::SystemTime::now();
+        s.last_file_created_at = Some(now);
+
+        // Calibration recording — if a save was pending, record the delta.
+        let mut emit: Option<serde_json::Value> = None;
+        if s.calibration.active {
+            if let Some(save_at) = s.calibration.pending_save_at.take() {
+                let delta_ms = now
+                    .duration_since(save_at)
+                    .map(|d| d.as_millis() as u64)
+                    .unwrap_or(0);
+                let sample = state::CalibrationSample {
+                    filename: filename.clone(),
+                    delta_ms,
+                };
+                s.calibration.samples.push(sample.clone());
+                let index = s.calibration.samples.len();
+                let target = s.calibration.target_samples;
+                let complete = index >= target;
+                if complete {
+                    let avg = s
+                        .calibration
+                        .samples
+                        .iter()
+                        .map(|s| s.delta_ms)
+                        .sum::<u64>()
+                        / s.calibration.samples.len() as u64;
+                    let worst = s
+                        .calibration
+                        .samples
+                        .iter()
+                        .map(|s| s.delta_ms)
+                        .max()
+                        .unwrap_or(0);
+                    let best = s
+                        .calibration
+                        .samples
+                        .iter()
+                        .map(|s| s.delta_ms)
+                        .min()
+                        .unwrap_or(0);
+                    s.calibration.active = false;
+                    emit = Some(serde_json::json!({
+                        "kind": "complete",
+                        "filename": sample.filename,
+                        "deltaMs": sample.delta_ms,
+                        "index": index,
+                        "target": target,
+                        "averageMs": avg,
+                        "worstMs": worst,
+                        "bestMs": best,
+                    }));
+                } else {
+                    emit = Some(serde_json::json!({
+                        "kind": "sample",
+                        "filename": sample.filename,
+                        "deltaMs": sample.delta_ms,
+                        "index": index,
+                        "target": target,
+                    }));
+                }
+            }
+        }
+        emit
+    };
+    if let Some(payload) = calibration_event {
+        let _ = app.emit("calibration-event", payload);
+    }
+    {
+        let mut s = state.lock().unwrap();
 
         // Log file creation
         let level = if is_warning {
@@ -607,11 +696,16 @@ fn spawn_save_clip_health_check(
     timer_tx: mpsc::Sender<TimerCommand>,
 ) {
     let save_at = std::time::SystemTime::now();
+    let timeout_secs = {
+        let s = state.lock().unwrap();
+        s.config.save_clip_health_check_timeout_secs.max(1) as u64
+    };
 
     tauri::async_runtime::spawn(async move {
-        // Window long enough for OBS to flush a clip from its replay buffer
-        // to disk. 5s is generous — clips usually appear within ~1s.
-        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        // Hardware-dependent — SSDs flush in <1s, slow HDDs / long replay
+        // buffers can take 5-10s. User can tune via the calibration tool
+        // in settings.
+        tokio::time::sleep(std::time::Duration::from_secs(timeout_secs)).await;
 
         // Did a FileCreated land after the user pressed save?
         let (already_saw_file, videos_folder, current_path) = {

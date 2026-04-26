@@ -10,6 +10,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import { updateConfig } from "@/lib/commands";
 import { ThemePanel } from "@/components/ThemePanel";
 import { KeybindInput } from "@/components/KeybindInput";
+import { SaveClipCalibration } from "@/components/SaveClipCalibration";
 import type { AppConfig } from "@/types";
 
 interface SettingsFormProps {
@@ -99,9 +100,36 @@ export function SettingsForm({ config, onConfigChange }: SettingsFormProps) {
             onChange={(v) => update({ save_clip_bind: v })}
           />
           <p className="text-[10px] text-t-muted">
-            Whatever key you press in OBS / ShadowPlay to save a clip.
+            Whatever key you press in OBS / ShadowPlay to save a clip. Used as
+            a watcher health probe — if no clip arrives within the timeout
+            below, we restart the watcher and rescan the folder.
           </p>
         </div>
+        <div className="space-y-1">
+          <Label className="text-xs">
+            Health-check timeout ({config.save_clip_health_check_timeout_secs}s)
+          </Label>
+          <Input
+            type="number"
+            min={1}
+            max={60}
+            value={config.save_clip_health_check_timeout_secs}
+            className="text-xs h-8"
+            onChange={(e) =>
+              update({
+                save_clip_health_check_timeout_secs: Math.max(
+                  1,
+                  Number(e.target.value) || 5,
+                ),
+              })
+            }
+          />
+          <p className="text-[10px] text-t-muted">
+            Hardware-dependent: SSDs flush in ~1s, slow HDDs or long replay
+            buffers can take 5-10s. Click below to measure yours.
+          </p>
+        </div>
+        <SaveClipCalibration config={config} onConfigChange={onConfigChange} />
         {(
           [
             ["g1_bind", "G1 Bind"],
