@@ -134,6 +134,7 @@ pub fn run() {
                 let app_handle = app_handle.clone();
                 let state = app_state.clone();
                 let timer_tx = timer_tx.clone();
+                let watcher_tx = watcher_tx.clone();
 
                 tauri::async_runtime::spawn(async move {
                     while let Some(event) = watcher_rx.recv().await {
@@ -181,20 +182,34 @@ pub fn run() {
                                 );
                             }
                             WatcherEvent::Error { message } => {
-                                let mut s = state.lock().unwrap();
-                                let entry = s.logger.log(
-                                    LogLevel::Error,
-                                    format!("Watcher error: {}", message),
-                                    LogCategory::WatcherStatus,
-                                );
-                                let _ = app_handle.emit("log-entry", &entry);
-                                let _ = app_handle.emit(
-                                    "error",
-                                    ErrorPayload {
-                                        message,
-                                        context: "watcher".to_string(),
-                                    },
-                                );
+                                {
+                                    let mut s = state.lock().unwrap();
+                                    let entry = s.logger.log(
+                                        LogLevel::Error,
+                                        format!("Watcher error: {} — auto-restarting", message),
+                                        LogCategory::WatcherStatus,
+                                    );
+                                    let _ = app_handle.emit("log-entry", &entry);
+                                    let _ = app_handle.emit(
+                                        "error",
+                                        ErrorPayload {
+                                            message: message.clone(),
+                                            context: "watcher".to_string(),
+                                        },
+                                    );
+                                }
+                                // notify on Windows (ReadDirectoryChangesW) can hit
+                                // transient errors — buffer overflow during a fast
+                                // OBS write, antivirus scan, drive sleep — and after
+                                // that the watcher is dead until respawned. Restart
+                                // automatically so the user doesn't have to relaunch
+                                // the app. If this proves insufficient, the planned
+                                // follow-up is a save-clip-bind health check: when
+                                // the user hits their save key, record the time; if
+                                // no FileCreated arrives within N seconds, restart
+                                // the watcher and rescan the folder for files
+                                // modified after that timestamp to recover the miss.
+                                let _ = watcher_tx.send(WatcherCommand::Restart).await;
                             }
                         }
                     }
