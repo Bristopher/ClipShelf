@@ -203,12 +203,10 @@ pub fn run() {
                                 // OBS write, antivirus scan, drive sleep — and after
                                 // that the watcher is dead until respawned. Restart
                                 // automatically so the user doesn't have to relaunch
-                                // the app. If this proves insufficient, the planned
-                                // follow-up is a save-clip-bind health check: when
-                                // the user hits their save key, record the time; if
-                                // no FileCreated arrives within N seconds, restart
-                                // the watcher and rescan the folder for files
-                                // modified after that timestamp to recover the miss.
+                                // the app. The save-clip-bind health check
+                                // (`spawn_save_clip_health_check`) handles the
+                                // *silent* failure mode where notify wedges without
+                                // emitting an error.
                                 let _ = watcher_tx.send(WatcherCommand::Restart).await;
                             }
                         }
@@ -220,8 +218,10 @@ pub fn run() {
             {
                 let app_handle = app_handle.clone();
                 let watcher_tx = watcher_tx.clone();
+                let state = app_state.clone();
+                let timer_tx = timer_tx.clone();
 
-                let bindings = vec![
+                let mut bindings = vec![
                     (HotkeyAction::MoveG1, config.g1_bind.clone()),
                     (HotkeyAction::MoveG2, config.g2_bind.clone()),
                     (HotkeyAction::MoveG3, config.g3_bind.clone()),
@@ -231,6 +231,19 @@ pub fn run() {
                         config.restart_watcher_bind.clone(),
                     ),
                 ];
+
+                // Only register the save-clip health check if the user has
+                // actually configured a bind. Note: this uses RegisterHotKey
+                // which is *exclusive* — if it's the same key the capture
+                // software listens to, OBS won't see it. The expected setup
+                // is a Logitech G Hub / AHK macro that fires both the
+                // capture-app key AND a separate dedicated key for us.
+                if !config.save_clip_bind.is_empty() {
+                    bindings.push((
+                        HotkeyAction::SaveClipHealthCheck,
+                        config.save_clip_bind.clone(),
+                    ));
+                }
 
                 match hotkeys::spawn_hotkey_listener(bindings) {
                     Ok(mut hotkey_rx) => {
@@ -257,6 +270,14 @@ pub fn run() {
                                         let _ = watcher_tx
                                             .send(WatcherCommand::Restart)
                                             .await;
+                                    }
+                                    HotkeyAction::SaveClipHealthCheck => {
+                                        spawn_save_clip_health_check(
+                                            app_handle.clone(),
+                                            state.clone(),
+                                            watcher_tx.clone(),
+                                            timer_tx.clone(),
+                                        );
                                     }
                                 }
                             }
@@ -503,6 +524,7 @@ async fn handle_file_created(
             renamed: false,
         });
         s.bind_chosen = None;
+        s.last_file_created_at = Some(std::time::SystemTime::now());
 
         // Log file creation
         let level = if is_warning {
@@ -561,6 +583,115 @@ async fn handle_file_created(
         let mut s = state.lock().unwrap();
         s.timer_running = true;
     }
+}
+
+/// Watcher health check tied to the user's capture-app save-clip hotkey.
+///
+/// When the user hits their save-clip key we expect the capture software to
+/// drop a new video file into the watched folder within a few seconds. If
+/// that doesn't show up via the watcher, either (a) the capture software
+/// failed to save (user error / hotkey mis-fire) or (b) the notify watcher
+/// is wedged in a way that the auto-restart-on-error path didn't catch
+/// (silent ReadDirectoryChangesW buffer-overflow drop, stale handle, etc.).
+///
+/// We can't tell (a) from (b) without looking at the disk, so we do exactly
+/// that: rescan the watched folder for any video file with a modification
+/// time newer than the moment the user pressed the key. If we find one,
+/// it's case (b) — the watcher missed it and we recover by injecting it.
+/// Otherwise we restart the watcher anyway as a defensive measure (cheap
+/// and harmless) and stay quiet about case (a).
+fn spawn_save_clip_health_check(
+    app: tauri::AppHandle,
+    state: AppState,
+    watcher_tx: mpsc::Sender<WatcherCommand>,
+    timer_tx: mpsc::Sender<TimerCommand>,
+) {
+    let save_at = std::time::SystemTime::now();
+
+    tauri::async_runtime::spawn(async move {
+        // Window long enough for OBS to flush a clip from its replay buffer
+        // to disk. 5s is generous — clips usually appear within ~1s.
+        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+
+        // Did a FileCreated land after the user pressed save?
+        let (already_saw_file, videos_folder, current_path) = {
+            let s = state.lock().unwrap();
+            let saw = s
+                .last_file_created_at
+                .map(|t| t >= save_at)
+                .unwrap_or(false);
+            let folder = s.config.videos_folder.clone();
+            let cur = s.current_file.as_ref().map(|f| f.path.clone());
+            (saw, folder, cur)
+        };
+
+        if already_saw_file {
+            return; // Healthy — watcher delivered, nothing to do.
+        }
+
+        if videos_folder.is_empty() {
+            return; // No folder configured; nothing to scan.
+        }
+
+        // Scan for files modified since save_at. Pick the newest unseen one.
+        let folder_path = std::path::PathBuf::from(&videos_folder);
+        let mut newest: Option<(std::path::PathBuf, std::time::SystemTime)> = None;
+        if let Ok(entries) = std::fs::read_dir(&folder_path) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if !watcher::is_video_file(&p) {
+                    continue;
+                }
+                if current_path.as_ref().map(|c| c == &p).unwrap_or(false) {
+                    continue; // Already the active file — not a recovery case.
+                }
+                if let Ok(meta) = entry.metadata() {
+                    if let Ok(mtime) = meta.modified() {
+                        if mtime >= save_at {
+                            match &newest {
+                                Some((_, prev)) if *prev >= mtime => {}
+                                _ => newest = Some((p, mtime)),
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Restart the watcher regardless — if we got here, it missed an
+        // event (or the user mis-fired their hotkey). Restart is cheap and
+        // unwedges any silent failure mode.
+        let _ = watcher_tx.send(WatcherCommand::Restart).await;
+
+        if let Some((path, _)) = newest {
+            // Recovery: the file is on disk but the watcher never reported
+            // it. Inject it through the normal pipeline.
+            {
+                let mut s = state.lock().unwrap();
+                let entry = s.logger.log(
+                    LogLevel::Warning,
+                    format!(
+                        "Save-clip health check: watcher missed {} — recovered via folder rescan",
+                        path.file_name().and_then(|n| n.to_str()).unwrap_or("?")
+                    ),
+                    LogCategory::WatcherStatus,
+                );
+                let _ = app.emit("log-entry", &entry);
+            }
+            let config = {
+                let s = state.lock().unwrap();
+                s.config.clone()
+            };
+            handle_file_created(&app, &state, &timer_tx, &config, path).await;
+        } else {
+            // Couldn't find a fresh file. Could be capture-software error
+            // OR the clip just hasn't flushed yet. Quiet log; user will see
+            // the watcher restart entry already.
+            log::info!(
+                "Save-clip health check: no new file found, watcher restarted defensively"
+            );
+        }
+    });
 }
 
 /// Parse time from an OBS or ShadowPlay filename.

@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::SystemTime;
 use tokio::sync::mpsc;
 
 use crate::config::AppConfig;
@@ -22,6 +23,11 @@ pub struct AppStateInner {
     pub logger: AppLogger,
     pub watcher_restart_count: u32,
     pub timer_running: bool,
+    /// Wall-clock time of the most recent `WatcherEvent::FileCreated` we
+    /// processed. The save-clip health check compares this against the time
+    /// the user pressed their capture-app hotkey to decide whether the
+    /// watcher is alive.
+    pub last_file_created_at: Option<SystemTime>,
 }
 
 impl AppStateInner {
@@ -35,6 +41,7 @@ impl AppStateInner {
             logger,
             watcher_restart_count: 0,
             timer_running: false,
+            last_file_created_at: None,
         }
     }
 }

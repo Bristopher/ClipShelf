@@ -11,6 +11,11 @@ pub enum HotkeyAction {
     MoveG3,
     Rename,
     RestartWatcher,
+    /// Fired when the user presses the configured `save_clip_bind`. We use it
+    /// as a watcher health probe: the user's capture software just saved a
+    /// clip, so a `FileCreated` event should arrive within a few seconds. If
+    /// not, the watcher is wedged and we restart it + rescan the folder.
+    SaveClipHealthCheck,
 }
 
 #[derive(Debug, Clone)]
