@@ -4,6 +4,13 @@ use tokio::time::{interval, Duration, MissedTickBehavior};
 
 use crate::events::TimerTickPayload;
 
+#[derive(Debug)]
+pub enum CountUpCommand {
+    /// Single-key toggle: if running, reset to 0 and stop; if stopped,
+    /// start counting up from 0.
+    Toggle,
+}
+
 pub enum TimerCommand {
     Start { duration_secs: u32 },
     Stop,
@@ -82,4 +89,62 @@ pub fn spawn_timer(
     });
 
     tx
+}
+
+/// Spawn a count-up timer task. Single command — `Toggle` — flips between
+/// running (counting up by 1s) and reset-and-stopped (at 0). Emits
+/// `tick_event` every second with the elapsed seconds (0 when stopped).
+pub fn spawn_count_up_timer(
+    app_handle: AppHandle,
+    tick_event: &'static str,
+) -> mpsc::Sender<CountUpCommand> {
+    let (tx, mut rx) = mpsc::channel::<CountUpCommand>(32);
+
+    tauri::async_runtime::spawn(async move {
+        let mut elapsed: u32 = 0;
+        let mut running = false;
+        let mut tick_interval = interval(Duration::from_secs(1));
+        // Same reasoning as the countdown timer: prevent backlogged ticks
+        // from draining all at once when running flips true.
+        tick_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+
+        loop {
+            tokio::select! {
+                cmd = rx.recv() => {
+                    match cmd {
+                        Some(CountUpCommand::Toggle) => {
+                            if running {
+                                running = false;
+                                elapsed = 0;
+                            } else {
+                                elapsed = 0;
+                                running = true;
+                            }
+                            let _ = app_handle.emit(tick_event, CountUpTickPayload {
+                                elapsed_secs: elapsed,
+                                running,
+                            });
+                        }
+                        None => break,
+                    }
+                }
+                _ = tick_interval.tick(), if running => {
+                    elapsed = elapsed.saturating_add(1);
+                    let _ = app_handle.emit(tick_event, CountUpTickPayload {
+                        elapsed_secs: elapsed,
+                        running,
+                    });
+                }
+            }
+        }
+    });
+
+    tx
+}
+
+#[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct CountUpTickPayload {
+    pub elapsed_secs: u32,
+    pub running: bool,
 }

@@ -7,7 +7,7 @@ use crate::mover;
 use crate::sound;
 use crate::state::{AppState, ChannelState, CurrentFile};
 use crate::theme::{Theme, ThemeExport, THEME_SCHEMA};
-use crate::timer::TimerCommand;
+use crate::timer::{CountUpCommand, TimerCommand};
 use crate::watcher::WatcherCommand;
 
 #[tauri::command]
@@ -307,6 +307,14 @@ pub fn start_calibration(
     s.calibration.pending_save_at = None;
     s.calibration.samples.clear();
     Ok(())
+}
+
+#[tauri::command]
+pub fn toggle_count_up(channels: State<'_, ChannelState>) -> Result<(), String> {
+    channels
+        .count_up_tx
+        .try_send(CountUpCommand::Toggle)
+        .map_err(|e| format!("Failed to send count-up toggle: {}", e))
 }
 
 #[tauri::command]

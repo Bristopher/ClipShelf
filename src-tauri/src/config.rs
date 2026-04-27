@@ -38,6 +38,7 @@ fn default_save_clip_bind() -> String { "".to_string() }
 fn default_timer_flash_enabled() -> bool { true }
 fn default_save_clip_health_check_timeout_secs() -> u32 { 5 }
 fn default_timer_flash_theme_id() -> Option<String> { None }
+fn default_count_up_bind() -> String { "".to_string() }
 
 // --- AppConfig struct ---
 
@@ -155,6 +156,12 @@ pub struct AppConfig {
     /// explicit choice (any built-in or custom theme id).
     #[serde(default = "default_timer_flash_theme_id")]
     pub timer_flash_theme_id: Option<String>,
+
+    /// Hotkey for the count-up stopwatch. First press starts at 0, second
+    /// press resets to 0 and stops, third press starts again. Empty = no
+    /// hotkey registered.
+    #[serde(default = "default_count_up_bind")]
+    pub count_up_bind: String,
 }
 
 impl Default for AppConfig {
@@ -193,6 +200,7 @@ impl Default for AppConfig {
             timer_flash_enabled: default_timer_flash_enabled(),
             save_clip_health_check_timeout_secs: default_save_clip_health_check_timeout_secs(),
             timer_flash_theme_id: default_timer_flash_theme_id(),
+            count_up_bind: default_count_up_bind(),
         }
     }
 }

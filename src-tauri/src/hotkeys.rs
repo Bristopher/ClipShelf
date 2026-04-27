@@ -16,6 +16,8 @@ pub enum HotkeyAction {
     /// clip, so a `FileCreated` event should arrive within a few seconds. If
     /// not, the watcher is wedged and we restart it + rescan the folder.
     SaveClipHealthCheck,
+    /// Toggle the count-up stopwatch — running ↔ reset-stopped-at-zero.
+    CountUpToggle,
 }
 
 #[derive(Debug, Clone)]

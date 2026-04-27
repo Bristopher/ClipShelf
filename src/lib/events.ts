@@ -8,6 +8,7 @@ export const EVENTS = {
   TIMER_EXPIRED: "timer-expired",
   USER_TIMER_TICK: "user-timer-tick",
   USER_TIMER_EXPIRED: "user-timer-expired",
+  COUNT_UP_TICK: "count-up-tick",
   LOG_ENTRY: "log-entry",
   WATCHER_STATUS: "watcher-status",
   OBS_WS_STATUS: "obs-ws-status",

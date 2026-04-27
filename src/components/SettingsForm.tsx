@@ -147,6 +147,17 @@ export function SettingsForm({ config, onConfigChange }: SettingsFormProps) {
             />
           </div>
         ))}
+        <div className="space-y-1">
+          <Label className="text-xs">Count-up stopwatch</Label>
+          <KeybindInput
+            value={config.count_up_bind}
+            onChange={(v) => update({ count_up_bind: v })}
+          />
+          <p className="text-[10px] text-t-muted">
+            Press once to start counting up from 0. Press again to reset and
+            stop. Press again to start over.
+          </p>
+        </div>
       </section>
 
       <Separator />

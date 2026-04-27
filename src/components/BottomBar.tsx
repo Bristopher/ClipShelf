@@ -2,14 +2,16 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { Play, RotateCcw } from "lucide-react";
+import { Play, RotateCcw, Timer as TimerIcon } from "lucide-react";
 import {
   wipeLog,
   restoreLog,
   startUserTimer,
   resetUserTimer,
+  toggleCountUp,
 } from "@/lib/commands";
 import { useTimer } from "@/hooks/useTimer";
+import { useCountUp } from "@/hooks/useCountUp";
 import { EVENTS } from "@/lib/events";
 import type { LogEntry } from "@/types";
 
@@ -40,6 +42,7 @@ export function BottomBar({
     tickEvent: EVENTS.USER_TIMER_TICK,
     expiredEvent: EVENTS.USER_TIMER_EXPIRED,
   });
+  const countUp = useCountUp();
 
   const handleWipe = async () => {
     await wipeLog();
@@ -103,6 +106,29 @@ export function BottomBar({
           title="Manual countdown"
         >
           {fmt(displaySecs)}
+        </span>
+      </div>
+
+      <Separator orientation="vertical" className="h-4" />
+
+      <div className="flex items-center gap-1.5">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 text-xs gap-1"
+          onClick={() => toggleCountUp().catch(console.error)}
+          title="Toggle count-up stopwatch (start ↔ reset)"
+        >
+          <TimerIcon className="h-3 w-3" />
+          {countUp.running ? "Reset" : "Start ↑"}
+        </Button>
+        <span
+          className={`font-mono text-[11px] tabular-nums px-1.5 py-0.5 rounded ${
+            countUp.running ? "text-t-text bg-panel" : "text-t-muted"
+          }`}
+          title="Count-up stopwatch"
+        >
+          {fmt(countUp.elapsedSecs)}
         </span>
       </div>
 

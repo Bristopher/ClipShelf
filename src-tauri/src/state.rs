@@ -5,7 +5,7 @@ use tokio::sync::mpsc;
 
 use crate::config::AppConfig;
 use crate::logger::AppLogger;
-use crate::timer::TimerCommand;
+use crate::timer::{CountUpCommand, TimerCommand};
 use crate::watcher::WatcherCommand;
 
 #[derive(Debug, Clone)]
@@ -73,4 +73,5 @@ pub struct ChannelState {
     pub timer_tx: mpsc::Sender<TimerCommand>,
     pub user_timer_tx: mpsc::Sender<TimerCommand>,
     pub watcher_tx: mpsc::Sender<WatcherCommand>,
+    pub count_up_tx: mpsc::Sender<CountUpCommand>,
 }

@@ -25,7 +25,7 @@ use events::*;
 use hotkeys::HotkeyAction;
 use obs_ws::{ObsWsCommand, ObsWsEvent};
 use state::{AppState, AppStateInner, ChannelState, CurrentFile};
-use timer::TimerCommand;
+use timer::{CountUpCommand, TimerCommand};
 use watcher::{WatcherCommand, WatcherEvent};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -106,6 +106,8 @@ pub fn run() {
                 "user-timer-tick",
                 "user-timer-expired",
             );
+            let count_up_tx =
+                timer::spawn_count_up_timer(app_handle.clone(), "count-up-tick");
 
             // Spawn file watcher
             let (watcher_tx, mut watcher_rx) = watcher::spawn_watcher();
@@ -115,6 +117,7 @@ pub fn run() {
                 timer_tx: timer_tx.clone(),
                 user_timer_tx: user_timer_tx.clone(),
                 watcher_tx: watcher_tx.clone(),
+                count_up_tx: count_up_tx.clone(),
             };
             app.manage(channel_state);
 
@@ -220,6 +223,7 @@ pub fn run() {
                 let watcher_tx = watcher_tx.clone();
                 let state = app_state.clone();
                 let timer_tx = timer_tx.clone();
+                let count_up_tx = count_up_tx.clone();
 
                 let mut bindings = vec![
                     (HotkeyAction::MoveG1, config.g1_bind.clone()),
@@ -242,6 +246,12 @@ pub fn run() {
                     bindings.push((
                         HotkeyAction::SaveClipHealthCheck,
                         config.save_clip_bind.clone(),
+                    ));
+                }
+                if !config.count_up_bind.is_empty() {
+                    bindings.push((
+                        HotkeyAction::CountUpToggle,
+                        config.count_up_bind.clone(),
                     ));
                 }
 
@@ -269,6 +279,11 @@ pub fn run() {
                                     HotkeyAction::RestartWatcher => {
                                         let _ = watcher_tx
                                             .send(WatcherCommand::Restart)
+                                            .await;
+                                    }
+                                    HotkeyAction::CountUpToggle => {
+                                        let _ = count_up_tx
+                                            .send(CountUpCommand::Toggle)
                                             .await;
                                     }
                                     HotkeyAction::SaveClipHealthCheck => {
@@ -503,6 +518,7 @@ pub fn run() {
             commands::reset_user_timer,
             commands::start_calibration,
             commands::cancel_calibration,
+            commands::toggle_count_up,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
