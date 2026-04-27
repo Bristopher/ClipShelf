@@ -112,12 +112,21 @@ pub fn run() {
             // Spawn file watcher
             let (watcher_tx, mut watcher_rx) = watcher::spawn_watcher();
 
+            // Spawn the hotkey listener up-front so we can stash its
+            // controller into ChannelState. update_config calls
+            // controller.reload(...) when the user changes any bind.
+            let initial_bindings = hotkeys::bindings_from_config(&config);
+            let (mut hotkey_rx, hotkey_controller) =
+                hotkeys::spawn_hotkey_listener(initial_bindings)
+                    .expect("Failed to spawn hotkey listener");
+
             // Create ChannelState
             let channel_state = ChannelState {
                 timer_tx: timer_tx.clone(),
                 user_timer_tx: user_timer_tx.clone(),
                 watcher_tx: watcher_tx.clone(),
                 count_up_tx: count_up_tx.clone(),
+                hotkey_controller,
             };
             app.manage(channel_state);
 
@@ -217,7 +226,9 @@ pub fn run() {
                 });
             }
 
-            // Spawn hotkey listener
+            // Spawn hotkey event handler. The listener thread itself was
+            // spawned earlier (so its controller could be put in
+            // ChannelState); here we just consume the receiver.
             {
                 let app_handle = app_handle.clone();
                 let watcher_tx = watcher_tx.clone();
@@ -225,101 +236,56 @@ pub fn run() {
                 let timer_tx = timer_tx.clone();
                 let count_up_tx = count_up_tx.clone();
 
-                let mut bindings = vec![
-                    (HotkeyAction::MoveG1, config.g1_bind.clone()),
-                    (HotkeyAction::MoveG2, config.g2_bind.clone()),
-                    (HotkeyAction::MoveG3, config.g3_bind.clone()),
-                    (HotkeyAction::Rename, config.rename_bind.clone()),
-                    (
-                        HotkeyAction::RestartWatcher,
-                        config.restart_watcher_bind.clone(),
-                    ),
-                ];
-
-                // Only register the save-clip health check if the user has
-                // actually configured a bind. Note: this uses RegisterHotKey
-                // which is *exclusive* — if it's the same key the capture
-                // software listens to, OBS won't see it. The expected setup
-                // is a Logitech G Hub / AHK macro that fires both the
-                // capture-app key AND a separate dedicated key for us.
-                if !config.save_clip_bind.is_empty() {
-                    bindings.push((
-                        HotkeyAction::SaveClipHealthCheck,
-                        config.save_clip_bind.clone(),
-                    ));
-                }
-                if !config.count_up_bind.is_empty() {
-                    bindings.push((
-                        HotkeyAction::CountUpToggle,
-                        config.count_up_bind.clone(),
-                    ));
-                }
-
-                match hotkeys::spawn_hotkey_listener(bindings) {
-                    Ok(mut hotkey_rx) => {
-                        tauri::async_runtime::spawn(async move {
-                            while let Some(action) = hotkey_rx.recv().await {
-                                match action {
-                                    HotkeyAction::MoveG1 => {
-                                        let _ = app_handle
-                                            .emit("hotkey-triggered", serde_json::json!({"key": 1}));
-                                    }
-                                    HotkeyAction::MoveG2 => {
-                                        let _ = app_handle
-                                            .emit("hotkey-triggered", serde_json::json!({"key": 2}));
-                                    }
-                                    HotkeyAction::MoveG3 => {
-                                        let _ = app_handle
-                                            .emit("hotkey-triggered", serde_json::json!({"key": 3}));
-                                    }
-                                    HotkeyAction::Rename => {
-                                        let _ = app_handle
-                                            .emit("hotkey-triggered", serde_json::json!({"key": 4}));
-                                    }
-                                    HotkeyAction::RestartWatcher => {
-                                        let _ = watcher_tx
-                                            .send(WatcherCommand::Restart)
-                                            .await;
-                                    }
-                                    HotkeyAction::CountUpToggle => {
-                                        let _ = count_up_tx
-                                            .send(CountUpCommand::Toggle)
-                                            .await;
-                                    }
-                                    HotkeyAction::SaveClipHealthCheck => {
-                                        // Arm calibration if active so the next
-                                        // FileCreated can compute its delta.
-                                        let calibrating = {
-                                            let mut s = state.lock().unwrap();
-                                            if s.calibration.active {
-                                                s.calibration.pending_save_at =
-                                                    Some(std::time::SystemTime::now());
-                                                true
-                                            } else {
-                                                false
-                                            }
-                                        };
-                                        if calibrating {
-                                            let _ = app_handle.emit(
-                                                "calibration-armed",
-                                                serde_json::json!({}),
-                                            );
-                                        }
-                                        spawn_save_clip_health_check(
-                                            app_handle.clone(),
-                                            state.clone(),
-                                            watcher_tx.clone(),
-                                            timer_tx.clone(),
-                                        );
-                                    }
-                                }
+                tauri::async_runtime::spawn(async move {
+                    while let Some(action) = hotkey_rx.recv().await {
+                        match action {
+                            HotkeyAction::MoveG1 => {
+                                let _ = app_handle
+                                    .emit("hotkey-triggered", serde_json::json!({"key": 1}));
                             }
-                        });
+                            HotkeyAction::MoveG2 => {
+                                let _ = app_handle
+                                    .emit("hotkey-triggered", serde_json::json!({"key": 2}));
+                            }
+                            HotkeyAction::MoveG3 => {
+                                let _ = app_handle
+                                    .emit("hotkey-triggered", serde_json::json!({"key": 3}));
+                            }
+                            HotkeyAction::Rename => {
+                                let _ = app_handle
+                                    .emit("hotkey-triggered", serde_json::json!({"key": 4}));
+                            }
+                            HotkeyAction::RestartWatcher => {
+                                let _ = watcher_tx.send(WatcherCommand::Restart).await;
+                            }
+                            HotkeyAction::CountUpToggle => {
+                                let _ = count_up_tx.send(CountUpCommand::Toggle).await;
+                            }
+                            HotkeyAction::SaveClipHealthCheck => {
+                                let calibrating = {
+                                    let mut s = state.lock().unwrap();
+                                    if s.calibration.active {
+                                        s.calibration.pending_save_at =
+                                            Some(std::time::SystemTime::now());
+                                        true
+                                    } else {
+                                        false
+                                    }
+                                };
+                                if calibrating {
+                                    let _ = app_handle
+                                        .emit("calibration-armed", serde_json::json!({}));
+                                }
+                                spawn_save_clip_health_check(
+                                    app_handle.clone(),
+                                    state.clone(),
+                                    watcher_tx.clone(),
+                                    timer_tx.clone(),
+                                );
+                            }
+                        }
                     }
-                    Err(e) => {
-                        log::error!("Failed to spawn hotkey listener: {}", e);
-                    }
-                }
+                });
             }
 
             // Spawn OBS WebSocket if enabled

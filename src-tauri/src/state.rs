@@ -74,4 +74,5 @@ pub struct ChannelState {
     pub user_timer_tx: mpsc::Sender<TimerCommand>,
     pub watcher_tx: mpsc::Sender<WatcherCommand>,
     pub count_up_tx: mpsc::Sender<CountUpCommand>,
+    pub hotkey_controller: crate::hotkeys::HotkeyController,
 }

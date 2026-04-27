@@ -1,8 +1,35 @@
+use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     RegisterHotKey, UnregisterHotKey, MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT,
 };
-use windows_sys::Win32::UI::WindowsAndMessaging::{GetMessageW, MSG, WM_HOTKEY};
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    GetMessageW, PostThreadMessageW, MSG, WM_HOTKEY, WM_USER,
+};
+
+/// Custom message ID our listener thread responds to to swap bindings.
+/// Values >= WM_USER are reserved for application use.
+const WM_HOTKEY_RELOAD: u32 = WM_USER + 1;
+
+/// Lets other threads swap the registered hotkeys at runtime. Cloned
+/// freely; all clones target the same listener thread.
+#[derive(Clone)]
+pub struct HotkeyController {
+    thread_id: u32,
+    pending: Arc<Mutex<Option<Vec<(HotkeyAction, String)>>>>,
+}
+
+impl HotkeyController {
+    /// Replace the current bindings. The listener thread will unregister
+    /// all old hotkeys and register the new set on its next message-pump
+    /// iteration. Safe to call from any thread.
+    pub fn reload(&self, bindings: Vec<(HotkeyAction, String)>) {
+        *self.pending.lock().unwrap() = Some(bindings);
+        unsafe {
+            PostThreadMessageW(self.thread_id, WM_HOTKEY_RELOAD, 0, 0);
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum HotkeyAction {
@@ -128,63 +155,111 @@ pub fn key_name_to_vk(name: &str) -> Result<u32, String> {
     }
 }
 
-pub fn spawn_hotkey_listener(
+/// Build the hotkey-binding list from a config snapshot. Empty/unset
+/// binds are skipped so we don't attempt to register zero-length keys.
+pub fn bindings_from_config(config: &crate::config::AppConfig) -> Vec<(HotkeyAction, String)> {
+    let mut bindings = vec![
+        (HotkeyAction::MoveG1, config.g1_bind.clone()),
+        (HotkeyAction::MoveG2, config.g2_bind.clone()),
+        (HotkeyAction::MoveG3, config.g3_bind.clone()),
+        (HotkeyAction::Rename, config.rename_bind.clone()),
+        (
+            HotkeyAction::RestartWatcher,
+            config.restart_watcher_bind.clone(),
+        ),
+    ];
+    if !config.save_clip_bind.is_empty() {
+        bindings.push((HotkeyAction::SaveClipHealthCheck, config.save_clip_bind.clone()));
+    }
+    if !config.count_up_bind.is_empty() {
+        bindings.push((HotkeyAction::CountUpToggle, config.count_up_bind.clone()));
+    }
+    bindings.into_iter().filter(|(_, s)| !s.is_empty()).collect()
+}
+
+/// Register a fresh set of hotkeys, replacing any previously registered
+/// IDs in `registered`. Must be called from the message-pump thread —
+/// RegisterHotKey is per-thread.
+fn apply_bindings(
     bindings: Vec<(HotkeyAction, String)>,
-) -> Result<mpsc::Receiver<HotkeyAction>, String> {
-    let (tx, rx) = mpsc::channel::<HotkeyAction>(32);
+    registered: &mut Vec<(i32, HotkeyAction)>,
+) {
+    // Unregister existing IDs first.
+    for (id, _) in registered.drain(..) {
+        unsafe {
+            UnregisterHotKey(std::ptr::null_mut(), id);
+        }
+    }
 
-    std::thread::spawn(move || {
-        // Parse bindings and associate each with an ID
-        let mut registered: Vec<(i32, HotkeyAction)> = Vec::new();
+    for (idx, (action, binding_str)) in bindings.into_iter().enumerate() {
+        let hotkey_id = (idx + 1) as i32; // IDs must be > 0
 
-        for (id, (action, binding_str)) in bindings.into_iter().enumerate() {
-            let hotkey_id = (id + 1) as i32; // IDs must be > 0
-
-            let binding = match parse_hotkey(&binding_str) {
-                Ok(b) => b,
-                Err(e) => {
-                    log::warn!("Failed to parse hotkey binding '{}': {}", binding_str, e);
-                    continue;
-                }
-            };
-
-            let mut modifiers: u32 = MOD_NOREPEAT as u32;
-            if binding.ctrl {
-                modifiers |= MOD_CONTROL as u32;
+        let binding = match parse_hotkey(&binding_str) {
+            Ok(b) => b,
+            Err(e) => {
+                log::warn!("Failed to parse hotkey binding '{}': {}", binding_str, e);
+                continue;
             }
-            if binding.alt {
-                modifiers |= MOD_ALT as u32;
-            }
-            if binding.shift {
-                modifiers |= MOD_SHIFT as u32;
-            }
+        };
 
-            let result = unsafe {
-                RegisterHotKey(
-                    std::ptr::null_mut(),
-                    hotkey_id,
-                    modifiers,
-                    binding.vk_code,
-                )
-            };
-
-            if result == 0 {
-                log::warn!(
-                    "Failed to register hotkey for action {:?} (binding: '{}')",
-                    action,
-                    binding_str
-                );
-            } else {
-                log::info!(
-                    "Registered hotkey id={} for action {:?}",
-                    hotkey_id,
-                    action
-                );
-                registered.push((hotkey_id, action));
-            }
+        let mut modifiers: u32 = MOD_NOREPEAT as u32;
+        if binding.ctrl {
+            modifiers |= MOD_CONTROL as u32;
+        }
+        if binding.alt {
+            modifiers |= MOD_ALT as u32;
+        }
+        if binding.shift {
+            modifiers |= MOD_SHIFT as u32;
         }
 
-        // Message pump
+        let result = unsafe {
+            RegisterHotKey(
+                std::ptr::null_mut(),
+                hotkey_id,
+                modifiers,
+                binding.vk_code,
+            )
+        };
+
+        if result == 0 {
+            log::warn!(
+                "Failed to register hotkey for action {:?} (binding: '{}')",
+                action,
+                binding_str
+            );
+        } else {
+            log::info!(
+                "Registered hotkey id={} for action {:?}",
+                hotkey_id,
+                action
+            );
+            registered.push((hotkey_id, action));
+        }
+    }
+}
+
+pub fn spawn_hotkey_listener(
+    initial_bindings: Vec<(HotkeyAction, String)>,
+) -> Result<(mpsc::Receiver<HotkeyAction>, HotkeyController), String> {
+    let (tx, rx) = mpsc::channel::<HotkeyAction>(32);
+    let pending: Arc<Mutex<Option<Vec<(HotkeyAction, String)>>>> = Arc::new(Mutex::new(None));
+    let pending_clone = pending.clone();
+
+    // Use a sync channel so we can hand the listener thread's GetCurrentThreadId
+    // back to the controller before this function returns.
+    let (tid_tx, tid_rx) = std::sync::mpsc::sync_channel::<u32>(1);
+
+    std::thread::spawn(move || {
+        // Capture our own thread ID so other threads can target us with
+        // PostThreadMessageW.
+        use windows_sys::Win32::System::Threading::GetCurrentThreadId;
+        let tid = unsafe { GetCurrentThreadId() };
+        let _ = tid_tx.send(tid);
+
+        let mut registered: Vec<(i32, HotkeyAction)> = Vec::new();
+        apply_bindings(initial_bindings, &mut registered);
+
         loop {
             let mut msg: MSG = unsafe { std::mem::zeroed() };
             let result = unsafe { GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) };
@@ -194,14 +269,25 @@ pub fn spawn_hotkey_listener(
                 break;
             }
 
-            if msg.message == WM_HOTKEY {
-                let hotkey_id = msg.wParam as i32;
-                if let Some((_, action)) = registered.iter().find(|(id, _)| *id == hotkey_id) {
-                    if let Err(e) = tx.blocking_send(action.clone()) {
-                        log::warn!("Failed to send hotkey action: {}", e);
-                        break;
+            match msg.message {
+                WM_HOTKEY => {
+                    let hotkey_id = msg.wParam as i32;
+                    if let Some((_, action)) = registered.iter().find(|(id, _)| *id == hotkey_id) {
+                        if let Err(e) = tx.blocking_send(action.clone()) {
+                            log::warn!("Failed to send hotkey action: {}", e);
+                            break;
+                        }
                     }
                 }
+                WM_HOTKEY_RELOAD => {
+                    // Take pending bindings and re-register.
+                    let new_bindings = pending_clone.lock().unwrap().take();
+                    if let Some(bindings) = new_bindings {
+                        log::info!("Reloading hotkey bindings ({} entries)", bindings.len());
+                        apply_bindings(bindings, &mut registered);
+                    }
+                }
+                _ => {}
             }
         }
 
@@ -213,7 +299,11 @@ pub fn spawn_hotkey_listener(
         }
     });
 
-    Ok(rx)
+    let thread_id = tid_rx
+        .recv()
+        .map_err(|e| format!("Hotkey listener didn't report its thread id: {}", e))?;
+
+    Ok((rx, HotkeyController { thread_id, pending }))
 }
 
 #[cfg(test)]

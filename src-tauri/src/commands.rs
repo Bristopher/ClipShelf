@@ -46,6 +46,12 @@ pub fn update_config(
         });
     }
 
+    // Hot-reload global hotkeys so a bind change in Settings takes effect
+    // immediately — no app restart needed.
+    channels
+        .hotkey_controller
+        .reload(crate::hotkeys::bindings_from_config(&config));
+
     let _ = app.emit("config-changed", &config);
     Ok(config)
 }
