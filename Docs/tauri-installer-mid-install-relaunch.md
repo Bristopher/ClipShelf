@@ -37,9 +37,8 @@ FunctionEnd
 `tauri-plugin-updater` invokes the installer with `/P` (passive) and
 `/R` (re-run after install). When both flags are present,
 `.onInstSuccess` calls `nsis_tauri_utils::RunAsUser` to launch the new
-binary using the explorer-shell drop-privilege trick. **That call fires
-while the installer process is still alive** — between "files copied"
-and "installer window closes."
+binary. **That call fires while the installer process is still alive** —
+between "files copied" and "installer window closes."
 
 The order is:
 
@@ -57,8 +56,7 @@ Installer process exits
 
 The `POSTINSTALL` hook's `taskkill` runs before `.onInstSuccess`, so
 the process it kills is the *old* one (already gone). The new instance
-spawned by `RunAsUser` starts fresh after `POSTINSTALL` already ran,
-which is why it survives.
+spawned by `RunAsUser` survives because nothing kills it after.
 
 Manual installer runs don't pass `/R`, so `.onInstSuccess` skips the
 relaunch — which is why the bug only reproduces via the updater.
@@ -67,40 +65,35 @@ relaunch — which is why the bug only reproduces via the updater.
 
 | Attempt | Why it fails |
 |---|---|
-| `MUI_FINISHPAGE_RUN_NOTCHECKED` in hooks | Only affects the GUI Finish-page checkbox. Passive mode skips the Finish page entirely; `.onInstSuccess` is a separate code path. |
-| Extra `taskkill` in `POSTINSTALL` | Runs *before* `.onInstSuccess`, so it kills nothing useful. |
-| Stripping `/R` from `$CMDLINE` in `POSTINSTALL` | Works to suppress the launch — but then the user never gets the post-update relaunch, which is the whole point of `/R`. You'd have to re-implement the relaunch yourself in NSIS, and any cmd-shell-based delayed-launch trick from inside NSIS is fragile (escaping nested quotes through `Exec` + `cmd /c start ""`). |
-| `app.exit(0)` from a Tauri command | Too late — the backend has already booted and grabbed file handles. |
+| `MUI_FINISHPAGE_RUN_NOTCHECKED` | Only affects the GUI Finish-page checkbox. Passive mode skips the Finish page; `.onInstSuccess` is a separate code path. |
+| Extra `taskkill` in `POSTINSTALL` | Runs *before* `.onInstSuccess`, so it kills the wrong instance. |
+| Stripping `/R` from `$CMDLINE` in `POSTINSTALL` | Suppresses the launch but you lose the post-update relaunch UX, and re-implementing it in NSIS means escaping nested quotes through `Exec`+`cmd /c start "" "..."` which is ugly and fragile. |
+| `app.exit(0)` from a Tauri command | Too late — backend has already booted and grabbed file handles. |
+| Spawning a detached `cmd.exe /c timeout && start ""` helper before exiting | Works, but it's a separate process that the OS now has to manage, and it's a 4-second sleep heuristic instead of a deterministic signal. Don't do this. |
 
 ## The fix
 
-Detect at the very top of `fn main()` whether our parent process is the
-NSIS installer, and if so:
+At the very top of `fn main()`, **before any backend or window initializes**,
+check the parent process. If it's the NSIS installer for this app, block
+on `WaitForSingleObject(parent_handle, INFINITE)` until the installer
+exits, then fall through to normal startup.
 
-1. Spawn a fully-detached helper that sleeps a few seconds (long enough
-   for the installer to exit) and then launches a fresh instance of the
-   app.
-2. `process::exit(0)` immediately. **Nothing else runs** — no Tauri
-   builder, no backend threads, no file watcher, no window. The
-   installer's `RunAsUser` call effectively becomes a no-op.
+Why this works:
 
-After the installer exits, the helper's `cmd.exe /c timeout && start`
-launches the app cleanly. The new instance has no installer in its
-ancestry, so the parent-process check returns false and it boots
-normally.
-
-### Why this beats fighting NSIS
-
-- Pure Rust, in your own codebase. No template overrides, no escaping
-  hell with `Exec`/`cmd`/`start` inside an NSIS string.
-- Works for any future updater quirk that ends up launching the app
-  while the installer is still alive — the check is "is my parent the
-  installer?", not "is some specific flag set?"
-- Manual installer runs naturally don't trigger the path, because they
-  don't relaunch the app (parent-check still works, but
-  `.onInstSuccess` doesn't fire on manual installs anyway).
-- No file system sentinels, no race conditions, no flaky sleeps in the
-  main process.
+- We've loaded **nothing** yet — no Tauri builder, no tokio runtime, no
+  watcher, no window, no file handles. The OS holds an EXECUTE mapping
+  on our own EXE image, but that doesn't conflict with anything the
+  installer is finalizing (registry writes, shortcut creation, its own
+  cleanup).
+- `WaitForSingleObject` is a deterministic signal, not a sleep heuristic.
+  The instant the installer exits, we proceed.
+- It's the **same process** that boots the app — no helper, no detached
+  cmd, no second launch. The OS process tree stays clean.
+- Manual installer runs don't pass `/R` so `.onInstSuccess` doesn't
+  relaunch anyway; the wait code path simply never executes.
+- Normal launches (Start menu, pinned shortcut, taskbar) have a parent
+  like `explorer.exe` — the parent-name check fails fast and the
+  function returns in microseconds.
 
 ### Implementation
 
@@ -121,30 +114,32 @@ windows-sys = { version = "0.59", features = [
 
 fn main() {
     #[cfg(windows)]
-    if launched_by_installer() {
-        spawn_delayed_relaunch();
-        std::process::exit(0);
-    }
+    wait_for_installer_parent();
+
     your_lib::run()
 }
 
 #[cfg(windows)]
-fn launched_by_installer() -> bool {
+fn wait_for_installer_parent() {
     use std::os::windows::ffi::OsStringExt;
     use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::System::Diagnostics::ToolHelp::{
         CreateToolhelp32Snapshot, Process32FirstW, Process32NextW,
         PROCESSENTRY32W, TH32CS_SNAPPROCESS,
     };
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, WaitForSingleObject, INFINITE, PROCESS_SYNCHRONIZE,
+    };
+
     unsafe {
         let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-        if snapshot == INVALID_HANDLE_VALUE { return false; }
+        if snapshot == INVALID_HANDLE_VALUE { return; }
 
+        // Pass 1: find our PID's parent.
         let mut entry: PROCESSENTRY32W = std::mem::zeroed();
         entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
         let our_pid = std::process::id();
         let mut parent_pid = None;
-
         if Process32FirstW(snapshot, &mut entry) != 0 {
             loop {
                 if entry.th32ProcessID == our_pid {
@@ -155,7 +150,8 @@ fn launched_by_installer() -> bool {
             }
         }
 
-        let mut is_installer = false;
+        // Pass 2: look up the parent's exe name.
+        let mut parent_is_installer = false;
         if let Some(ppid) = parent_pid {
             let mut e2: PROCESSENTRY32W = std::mem::zeroed();
             e2.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
@@ -167,7 +163,7 @@ fn launched_by_installer() -> bool {
                         let name = std::ffi::OsString::from_wide(&e2.szExeFile[..len]);
                         // Tauri NSIS pattern: <product>_<version>_<arch>-setup.exe
                         if name.to_string_lossy().to_lowercase().ends_with("-setup.exe") {
-                            is_installer = true;
+                            parent_is_installer = true;
                         }
                         break;
                     }
@@ -176,63 +172,86 @@ fn launched_by_installer() -> bool {
             }
         }
         CloseHandle(snapshot);
-        is_installer
+
+        if !parent_is_installer { return; }
+        let Some(ppid) = parent_pid else { return };
+
+        // PROCESS_SYNCHRONIZE is the minimum right needed for
+        // WaitForSingleObject on a process handle.
+        let h = OpenProcess(PROCESS_SYNCHRONIZE, 0, ppid);
+        if h.is_null() { return; }
+        WaitForSingleObject(h, INFINITE);
+        CloseHandle(h);
     }
-}
-
-#[cfg(windows)]
-fn spawn_delayed_relaunch() {
-    use std::os::windows::process::CommandExt;
-    const DETACHED_PROCESS: u32 = 0x0000_0008;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-
-    let Ok(exe) = std::env::current_exe() else { return };
-    let cmd = format!(
-        r#"/c timeout /t 4 /nobreak >nul && start "" "{}""#,
-        exe.display()
-    );
-    let _ = std::process::Command::new("cmd.exe")
-        .raw_arg(cmd)
-        .creation_flags(DETACHED_PROCESS | CREATE_NO_WINDOW)
-        .spawn();
 }
 ```
 
-### What about non-Tauri Windows apps?
+That's it. No helper process, no sleep, no second launch.
 
-The same pattern works for **any** Windows app whose installer relaunches
-it before exiting (custom InnoSetup, WiX, plain NSIS, etc.). The only
-thing to tweak is the installer-name detection — adjust the
-`ends_with("-setup.exe")` check to match your installer's output name.
+## Sequence with the fix
 
-For installers that pass an explicit "I just installed you" CLI flag
-(e.g. Velopack's `--veloapp-install`/`--veloapp-updated`/`--veloapp-obsolete`),
-prefer matching on the flag instead of the parent-process name — it's
-more deterministic. The flow is identical: detect → `process::exit(0)`
-before any backend boots → optionally spawn a detached helper to
-relaunch later.
+```
+Updater runs setup.exe with /P /R
+  ↓
+PREINSTALL hook kills old app
+  ↓
+Files copy
+  ↓
+POSTINSTALL hook
+  ↓
+.onInstSuccess → RunAsUser launches new app
+  ↓
+new app: main() entered
+  ↓
+new app: parent is "MyApp_2.0.6_x64-setup.exe" → WaitForSingleObject
+  ↓
+installer window closes; installer process exits
+  ↓
+new app: WaitForSingleObject returns → falls through to run() → boots normally
+```
+
+## What about non-Tauri Windows apps?
+
+The same pattern applies anywhere an installer launches the new binary
+before the installer process exits.
+
+- Plain NSIS / WiX / Inno: tweak the `ends_with("-setup.exe")` to match
+  your installer's output name (`*-Setup.exe`, `*Installer.exe`, etc.).
+- Velopack: prefer matching on the lifecycle CLI flags
+  (`--veloapp-install`, `--veloapp-updated`, `--veloapp-obsolete`) and
+  exiting with `process::exit(0)` immediately. Velopack passes a
+  *different* flag (`--veloapp-firstrun`) for the actual post-install
+  launch — so you don't need the wait dance, you just don't catch
+  firstrun and it falls through to normal startup. This is the cleanest
+  variant of the pattern when the installer cooperates with explicit
+  flags.
+- Other auto-updaters with no signal flags: the parent-process-wait
+  approach in this doc is the universal fallback.
+
+The general rule: **detect the install-time launch as early as possible,
+then either exit (if the installer will launch you again later) or wait
+(if it won't).** Never let the backend boot during this window.
 
 ## Verifying the fix
 
 1. Build a release installer: `pnpm tauri build`.
 2. Run the previous version, leave it open in the tray.
 3. Trigger an update through the in-app updater UI.
-4. Expected: progress bar fills, installer window closes, ~4 seconds
-   later the new app launches. **No mid-install window flash, no
-   "install failed" dialog.**
+4. Expected: progress bar fills, installer window closes, the new app
+   launches in its place. No mid-install window flash. No "install
+   failed" dialog.
 5. Manual sanity check: double-click the new `*-setup.exe`. Expected:
    normal install, no app launch from the installer (the user clicks
-   "Run app" on Finish page if they want it).
+   "Run app" on the Finish page if they want it).
 
 ## Diagnostic tips
 
 - If you suspect the installer-relaunch path is firing, check
   `target/release/nsis/x64/installer.nsi` for the `.onInstSuccess`
   block. The `nsis_tauri_utils::RunAsUser` call is the smoking gun.
-- To capture the parent process name during install for confirmation,
-  temporarily log it to a file in the early `main()` check before
-  exiting. The Tauri NSIS installer is named e.g. `MyApp_2.0.6_x64-setup.exe`.
-- If the helper relaunch isn't firing, confirm `cmd.exe`'s `timeout`
-  command exists in the user's PATH (it ships with Windows since
-  Vista, so this is virtually guaranteed). The 4-second delay can be
-  tuned — anything ≥ 2 seconds is generally safe.
+- To capture the parent process name during install, temporarily log it
+  to a file in `wait_for_installer_parent` before the early return. The
+  Tauri NSIS installer is named like `MyApp_2.0.6_x64-setup.exe`.
+- If `WaitForSingleObject` never returns, the parent isn't actually the
+  installer — your detection match is too loose. Tighten the suffix
+  check.
