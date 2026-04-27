@@ -40,6 +40,22 @@
   ; so the install completes cleanly and the user can launch fresh.
   DetailPrint "Ensuring no GKey Mover instance is running..."
   !insertmacro KILL_GKEY_MOVER
+
+  ; Tauri's updater passes /R, which makes the template's .onInstSuccess
+  ; relaunch the app via nsis_tauri_utils::RunAsUser BEFORE the installer
+  ; window has actually closed — that's the "app opens right before
+  ; install finishes" behavior. We can't override .onInstSuccess, but we
+  ; can wipe /R from $CMDLINE so it skips, then schedule our own launch
+  ; that fires AFTER the installer exits.
+  ClearErrors
+  ${GetOptions} $CMDLINE "/R" $R9
+  ${IfNot} ${Errors}
+    DetailPrint "Suppressing mid-install relaunch; scheduling delayed launch..."
+    StrCpy $CMDLINE ""
+    ; Detached cmd: waits 4s for installer to fully exit, then launches.
+    ; Using backtick-quoted NSIS string so we can embed "" literally.
+    Exec `cmd.exe /c start "" /B cmd.exe /c "timeout /t 4 /nobreak >nul && start "" "$INSTDIR\${MAINBINARYNAME}.exe""`
+  ${EndIf}
 !macroend
 
 !macro NSIS_HOOK_PREUNINSTALL
