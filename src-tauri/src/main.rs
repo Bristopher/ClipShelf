@@ -9,9 +9,13 @@ fn main() {
     // on files the installer is still finalizing — install fails or the
     // user sees the app pop up mid-install. We can't override the
     // template, but we can detect the case at the very top of main()
-    // and exit before anything initializes.
+    // and exit before anything initializes. To preserve the updater's
+    // "open the app after update" UX, we spawn a fully-detached helper
+    // that waits a few seconds for the installer to exit, then launches
+    // a fresh instance.
     #[cfg(windows)]
     if launched_by_installer() {
+        spawn_delayed_relaunch();
         std::process::exit(0);
     }
 
@@ -89,4 +93,31 @@ fn launched_by_installer() -> bool {
         CloseHandle(snapshot);
         is_installer
     }
+}
+
+/// Spawn a detached cmd.exe that sleeps for a few seconds (long enough
+/// for the NSIS installer to fully exit and release any handles), then
+/// launches a new instance of this app via `start`. The helper outlives
+/// our own exit because DETACHED_PROCESS gives it no parent dependency.
+#[cfg(windows)]
+fn spawn_delayed_relaunch() {
+    use std::os::windows::process::CommandExt;
+    const DETACHED_PROCESS: u32 = 0x0000_0008;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+    let exe = match std::env::current_exe() {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+    // Single /c command: wait, then `start "" "<exe>"` to launch fully
+    // detached from the cmd shell. raw_arg avoids Rust's auto-escaping
+    // mangling the embedded quotes.
+    let cmd = format!(
+        r#"/c timeout /t 4 /nobreak >nul && start "" "{}""#,
+        exe.display()
+    );
+    let _ = std::process::Command::new("cmd.exe")
+        .raw_arg(cmd)
+        .creation_flags(DETACHED_PROCESS | CREATE_NO_WINDOW)
+        .spawn();
 }
