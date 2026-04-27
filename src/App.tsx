@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getConfig, updateConfig, pressGkey, setWindowOpacity } from "@/lib/commands";
 import { EVENTS } from "@/lib/events";
 import { useEventLog } from "@/hooks/useEventLog";
 import { useTimer } from "@/hooks/useTimer";
 import { useTheme } from "@/hooks/useTheme";
+import { resolveFlashTheme } from "@/lib/themes";
 import { EventLog } from "@/components/EventLog";
 import { Sidebar } from "@/components/Sidebar";
 import { TimerDisplay } from "@/components/TimerDisplay";
@@ -39,7 +40,6 @@ function playBeep() {
 function App() {
   const [config, setConfig] = useState<AppConfig | null>(null);
   const { entries, clear, restore } = useEventLog();
-  useTheme(config);
 
   useEffect(() => {
     getConfig().then(setConfig).catch(console.error);
@@ -119,10 +119,11 @@ function App() {
     expiredEvent: EVENTS.USER_TIMER_EXPIRED,
   });
 
-  // Flash the whole window with inverted colors each second once either
-  // countdown is at 5s or fewer — opt-out via `timer_flash_enabled`. Parity
-  // of the remaining-seconds integer drives the toggle (ticks arrive every
-  // 1s so the class flips every tick).
+  // Flash the whole window each second once either countdown is at 5s or
+  // fewer — opt-out via `timer_flash_enabled`. Parity of the remaining-
+  // seconds integer drives the toggle (ticks arrive every 1s so the class
+  // flips every tick). When on, useTheme swaps to the contrasting/override
+  // theme; when off, it reapplies the active theme.
   const flashOn = (() => {
     if (!config?.timer_flash_enabled) return false;
     const t = timer.running && timer.remainingSecs > 0 && timer.remainingSecs <= 5
@@ -132,6 +133,12 @@ function App() {
         : 0;
     return t > 0 && t % 2 === 1;
   })();
+
+  const flashOverride = useMemo(
+    () => (flashOn && config ? resolveFlashTheme(config) : null),
+    [flashOn, config?.timer_flash_theme_id, config?.active_theme_id, config?.themes],
+  );
+  useTheme(config, flashOverride);
 
   if (!config) {
     return (
@@ -146,7 +153,6 @@ function App() {
       className="flex flex-col h-screen"
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
-      style={flashOn ? { filter: "invert(1) hue-rotate(180deg)" } : undefined}
     >
       <TitleBar />
       <div className="flex flex-1 min-h-0 relative">

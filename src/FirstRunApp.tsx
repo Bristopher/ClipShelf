@@ -24,7 +24,7 @@ export function FirstRunApp() {
   const [renameBind, setRenameBind] = useState("");
   const [saveClipBind, setSaveClipBind] = useState("");
   const [saving, setSaving] = useState(false);
-  useTheme(config);
+  useTheme(config, null);
 
   useEffect(() => {
     getConfig().then((cfg) => {

@@ -11,6 +11,7 @@ import { updateConfig } from "@/lib/commands";
 import { ThemePanel } from "@/components/ThemePanel";
 import { KeybindInput } from "@/components/KeybindInput";
 import { SaveClipCalibration } from "@/components/SaveClipCalibration";
+import { allThemes, resolveFlashTheme } from "@/lib/themes";
 import type { AppConfig } from "@/types";
 
 interface SettingsFormProps {
@@ -248,8 +249,8 @@ export function SettingsForm({ config, onConfigChange }: SettingsFormProps) {
           <div className="pr-2">
             <Label className="text-xs">Flash window at ≤ 5s left</Label>
             <p className="text-[10px] text-t-muted">
-              Inverts the theme once per second so it's obvious the timer is
-              about to expire.
+              Swaps to a contrasting theme once per second so it's obvious the
+              timer is about to expire.
             </p>
           </div>
           <Switch
@@ -257,6 +258,46 @@ export function SettingsForm({ config, onConfigChange }: SettingsFormProps) {
             onCheckedChange={(v) => update({ timer_flash_enabled: v })}
           />
         </div>
+        {config.timer_flash_enabled && (
+          <div className="space-y-1.5 pl-2 border-l-2 border-t-border">
+            <div className="flex items-center justify-between">
+              <div className="pr-2">
+                <Label className="text-xs">Override flash theme</Label>
+                <p className="text-[10px] text-t-muted">
+                  Off = auto-pick (light → dark, dark → light). On lets you
+                  choose any theme to swap to during flash.
+                </p>
+              </div>
+              <Switch
+                checked={config.timer_flash_theme_id != null}
+                onCheckedChange={(v) =>
+                  update({
+                    timer_flash_theme_id: v
+                      ? resolveFlashTheme(config).id
+                      : null,
+                  })
+                }
+              />
+            </div>
+            {config.timer_flash_theme_id != null && (
+              <select
+                value={config.timer_flash_theme_id}
+                onChange={(e) =>
+                  update({ timer_flash_theme_id: e.target.value })
+                }
+                className="w-full text-xs h-8 px-2 rounded bg-panel border border-t-border"
+              >
+                {allThemes(config)
+                  .filter((t) => t.id !== "system")
+                  .map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                    </option>
+                  ))}
+              </select>
+            )}
+          </div>
+        )}
       </section>
 
       <Separator />

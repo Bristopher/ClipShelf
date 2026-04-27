@@ -10,7 +10,7 @@ import type { AppConfig } from "@/types";
 
 export function SettingsApp() {
   const [config, setConfig] = useState<AppConfig | null>(null);
-  useTheme(config);
+  useTheme(config, null);
 
   useEffect(() => {
     getConfig().then(setConfig).catch(console.error);

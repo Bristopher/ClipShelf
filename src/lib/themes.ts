@@ -161,6 +161,43 @@ export function isValidCssColor(value: string): boolean {
   return probe.style.color !== "";
 }
 
+/**
+ * Theme to swap to during the ≤5s timer flash. If the user picked one
+ * explicitly via `timer_flash_theme_id`, use that. Otherwise auto-pick the
+ * contrasting built-in: light active theme → dark, dark → light.
+ */
+export function resolveFlashTheme(config: AppConfig): Theme {
+  const all = [...BUILTIN_THEMES, ...(config.themes ?? [])];
+  if (config.timer_flash_theme_id) {
+    const explicit = all.find((t) => t.id === config.timer_flash_theme_id);
+    if (explicit) return explicit;
+  }
+  const active = resolveTheme(config);
+  const targetId = isLightTheme(active) ? "dark" : "light";
+  return BUILTIN_THEMES.find((t) => t.id === targetId) ?? BUILTIN_THEMES[0];
+}
+
+/**
+ * Rough light-vs-dark classification by relative luminance of the theme's
+ * `app_bg`. Uses the canvas trick to normalize any CSS color (oklch, hex,
+ * rgba) to an rgb() string we can parse.
+ */
+export function isLightTheme(theme: Theme): boolean {
+  const rgb = parseColorToRgb(theme.tokens.app_bg);
+  if (!rgb) return false;
+  const lum = (0.2126 * rgb.r + 0.7152 * rgb.g + 0.0722 * rgb.b) / 255;
+  return lum > 0.5;
+}
+
+function parseColorToRgb(color: string): { r: number; g: number; b: number } | null {
+  const resolved = resolveCssColor(color);
+  if (!resolved) return null;
+  // Browser's canvas returns rgb()/rgba() form.
+  const m = resolved.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+  if (!m) return null;
+  return { r: Number(m[1]), g: Number(m[2]), b: Number(m[3]) };
+}
+
 export function emptyTokens(): ThemeTokens {
   return { ...BUILTIN_THEMES[0].tokens };
 }

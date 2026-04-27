@@ -82,6 +82,8 @@ export interface AppConfig {
   save_clip_bind: string;
   timer_flash_enabled: boolean;
   save_clip_health_check_timeout_secs: number;
+  /** null = auto-pick contrasting built-in theme; otherwise theme id to swap to during ≤5s flash. */
+  timer_flash_theme_id: string | null;
 }
 
 export interface CalibrationSampleEvent {

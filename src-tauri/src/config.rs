@@ -37,6 +37,7 @@ fn default_themes() -> Vec<Theme> { Vec::new() }
 fn default_save_clip_bind() -> String { "".to_string() }
 fn default_timer_flash_enabled() -> bool { true }
 fn default_save_clip_health_check_timeout_secs() -> u32 { 5 }
+fn default_timer_flash_theme_id() -> Option<String> { None }
 
 // --- AppConfig struct ---
 
@@ -147,6 +148,13 @@ pub struct AppConfig {
     /// take 5-10s. Use the calibration tool in settings to measure yours.
     #[serde(default = "default_save_clip_health_check_timeout_secs")]
     pub save_clip_health_check_timeout_secs: u32,
+
+    /// When the ≤5s timer flash fires, swap to this theme instead of the
+    /// CSS-invert effect. `None` = auto-pick: light active theme → dark, dark
+    /// → light. Setting an id here overrides the auto-pick with the user's
+    /// explicit choice (any built-in or custom theme id).
+    #[serde(default = "default_timer_flash_theme_id")]
+    pub timer_flash_theme_id: Option<String>,
 }
 
 impl Default for AppConfig {
@@ -184,6 +192,7 @@ impl Default for AppConfig {
             save_clip_bind: default_save_clip_bind(),
             timer_flash_enabled: default_timer_flash_enabled(),
             save_clip_health_check_timeout_secs: default_save_clip_health_check_timeout_secs(),
+            timer_flash_theme_id: default_timer_flash_theme_id(),
         }
     }
 }
