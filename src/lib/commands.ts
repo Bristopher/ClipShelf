@@ -24,3 +24,4 @@ export const startCalibration = (targetSamples: number) =>
   invoke<void>("start_calibration", { targetSamples });
 export const cancelCalibration = () => invoke<void>("cancel_calibration");
 export const toggleCountUp = () => invoke<void>("toggle_count_up");
+export const fullQuit = () => invoke<void>("full_quit");

@@ -310,6 +310,14 @@ pub fn start_calibration(
 }
 
 #[tauri::command]
+pub fn full_quit(app: AppHandle) {
+    // Ctrl+click on the X — bypass the hide-to-tray behavior and exit the
+    // process. Used by the title-bar close button when the user wants to
+    // stop the app entirely (e.g. before running an installer upgrade).
+    app.exit(0);
+}
+
+#[tauri::command]
 pub fn toggle_count_up(channels: State<'_, ChannelState>) -> Result<(), String> {
     channels
         .count_up_tx

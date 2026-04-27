@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getVersion } from "@tauri-apps/api/app";
-import { Minus, Square, X } from "lucide-react";
-import { resetWindow } from "@/lib/commands";
+import { Minus, Skull, Square, X } from "lucide-react";
+import { resetWindow, fullQuit } from "@/lib/commands";
 import logoUrl from "@/assets/gkey-logo.png";
 
 const appWindow = getCurrentWindow();
@@ -12,11 +12,34 @@ type HoverId = "title" | "min" | "max" | "close";
 export function TitleBar() {
   const [hovered, setHovered] = useState<HoverId | null>(null);
   const [version, setVersion] = useState<string>("");
+  const [ctrlHeld, setCtrlHeld] = useState(false);
   const hoverTimer = useRef<number | null>(null);
 
   useEffect(() => {
     getVersion().then(setVersion).catch(console.error);
   }, []);
+
+  // While the close button is hovered, watch for Ctrl key state. We toggle
+  // the icon (X ↔ skull) and tooltip text based on whether Ctrl is held so
+  // the user knows clicking will fully quit instead of hiding to tray.
+  useEffect(() => {
+    if (hovered !== "close") {
+      setCtrlHeld(false);
+      return;
+    }
+    const onDown = (e: KeyboardEvent) => {
+      if (e.key === "Control") setCtrlHeld(true);
+    };
+    const onUp = (e: KeyboardEvent) => {
+      if (e.key === "Control") setCtrlHeld(false);
+    };
+    document.addEventListener("keydown", onDown);
+    document.addEventListener("keyup", onUp);
+    return () => {
+      document.removeEventListener("keydown", onDown);
+      document.removeEventListener("keyup", onUp);
+    };
+  }, [hovered]);
 
   const startDrag = (e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest("button")) return;
@@ -81,19 +104,25 @@ export function TitleBar() {
         >
           <Square className="h-3 w-3" />
         </BarButton>
-        <BarButton
+        <CloseButton
           active={hovered === "close"}
-          tip="Hide to tray"
-          onEnter={() => onEnter("close")}
-          onLeave={onLeave}
-          onClick={() => {
-            onLeave();
-            appWindow.hide();
+          ctrlHeld={ctrlHeld}
+          onEnter={() => {
+            // We do NOT use the 350ms delay here so the Ctrl-detection
+            // listener arms immediately on hover.
+            if (hoverTimer.current) window.clearTimeout(hoverTimer.current);
+            setHovered("close");
           }}
-          hoverClass="hover:bg-red-600 hover:text-white"
-        >
-          <X className="h-4 w-4" />
-        </BarButton>
+          onLeave={onLeave}
+          onClick={(e) => {
+            onLeave();
+            if (e.ctrlKey) {
+              fullQuit().catch(console.error);
+            } else {
+              appWindow.hide();
+            }
+          }}
+        />
       </div>
     </div>
   );
@@ -127,6 +156,70 @@ function BarButton({
         {children}
       </button>
       {active && <Tooltip align="center" text={tip} />}
+    </div>
+  );
+}
+
+function CloseButton({
+  active,
+  ctrlHeld,
+  onEnter,
+  onLeave,
+  onClick,
+}: {
+  active: boolean;
+  ctrlHeld: boolean;
+  onEnter: () => void;
+  onLeave: () => void;
+  onClick: (e: React.MouseEvent) => void;
+}) {
+  const hoverClass = ctrlHeld
+    ? "hover:bg-red-700 hover:text-white"
+    : "hover:bg-red-600 hover:text-white";
+  const baseClass = ctrlHeld ? "bg-red-600/40 text-white" : "text-t-muted";
+  return (
+    <div className="relative h-full">
+      <button
+        onMouseEnter={onEnter}
+        onMouseLeave={onLeave}
+        onClick={onClick}
+        className={`h-full w-10 flex items-center justify-center transition-colors ${baseClass} ${hoverClass}`}
+      >
+        <div className="relative h-4 w-4">
+          <X
+            className={`absolute inset-0 h-4 w-4 transition-all duration-200 ${
+              ctrlHeld ? "scale-0 rotate-90 opacity-0" : "scale-100 opacity-100"
+            }`}
+          />
+          <Skull
+            className={`absolute inset-0 h-4 w-4 transition-all duration-200 ${
+              ctrlHeld ? "scale-100 opacity-100" : "scale-0 -rotate-90 opacity-0"
+            }`}
+          />
+        </div>
+      </button>
+      {active && <CloseTooltip ctrlHeld={ctrlHeld} />}
+    </div>
+  );
+}
+
+function CloseTooltip({ ctrlHeld }: { ctrlHeld: boolean }) {
+  return (
+    <div
+      className="absolute top-full mt-1.5 right-0 pointer-events-none z-50"
+      aria-hidden="true"
+    >
+      <div className="relative px-2.5 py-1.5 rounded-md bg-popover text-popover-foreground shadow-lg border border-border whitespace-nowrap animate-in fade-in-0 zoom-in-95 duration-150">
+        <p className="text-[11px] font-semibold leading-tight">
+          {ctrlHeld ? "Quit GKey Mover" : "Hide to tray"}
+        </p>
+        <p className="text-[9px] text-muted-foreground leading-tight mt-0.5">
+          {ctrlHeld
+            ? "Fully exit the application"
+            : "Hold Ctrl + click to fully quit"}
+        </p>
+        <div className="absolute -top-1 right-3 w-2 h-2 bg-popover border-l border-t border-border rotate-45" />
+      </div>
     </div>
   );
 }

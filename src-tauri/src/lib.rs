@@ -519,6 +519,7 @@ pub fn run() {
             commands::start_calibration,
             commands::cancel_calibration,
             commands::toggle_count_up,
+            commands::full_quit,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
