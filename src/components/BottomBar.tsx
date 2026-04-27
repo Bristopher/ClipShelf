@@ -2,17 +2,9 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { Play, RotateCcw, Timer as TimerIcon } from "lucide-react";
-import {
-  wipeLog,
-  restoreLog,
-  startUserTimer,
-  resetUserTimer,
-  toggleCountUp,
-} from "@/lib/commands";
-import { useTimer } from "@/hooks/useTimer";
+import { Timer as TimerIcon } from "lucide-react";
+import { wipeLog, restoreLog, toggleCountUp } from "@/lib/commands";
 import { useCountUp } from "@/hooks/useCountUp";
-import { EVENTS } from "@/lib/events";
 import type { LogEntry } from "@/types";
 
 interface BottomBarProps {
@@ -21,7 +13,6 @@ interface BottomBarProps {
   onAutoWipeChange: (value: boolean) => void;
   onWipe: () => void;
   onRestore: (entries: LogEntry[]) => void;
-  configuredSecs: number;
 }
 
 function fmt(secs: number) {
@@ -36,12 +27,7 @@ export function BottomBar({
   onAutoWipeChange,
   onWipe,
   onRestore,
-  configuredSecs,
 }: BottomBarProps) {
-  const userTimer = useTimer(configuredSecs, {
-    tickEvent: EVENTS.USER_TIMER_TICK,
-    expiredEvent: EVENTS.USER_TIMER_EXPIRED,
-  });
   const countUp = useCountUp();
 
   const handleWipe = async () => {
@@ -53,10 +39,6 @@ export function BottomBar({
     const restored = await restoreLog();
     onRestore(restored);
   };
-
-  const displaySecs = userTimer.running
-    ? userTimer.remainingSecs
-    : configuredSecs;
 
   return (
     <div className="border-t border-t-border px-3 py-1.5 flex items-center gap-3 text-xs">
@@ -72,42 +54,6 @@ export function BottomBar({
       <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={handleRestore}>
         Restore
       </Button>
-
-      <Separator orientation="vertical" className="h-4" />
-
-      <div className="flex items-center gap-1.5">
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-7 text-xs gap-1"
-          onClick={() => startUserTimer().catch(console.error)}
-          title="Start the manual countdown"
-        >
-          <Play className="h-3 w-3" />
-          Start
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-7 text-xs gap-1"
-          onClick={() => resetUserTimer().catch(console.error)}
-          title="Reset the manual countdown"
-          disabled={!userTimer.running && userTimer.remainingSecs === configuredSecs}
-        >
-          <RotateCcw className="h-3 w-3" />
-          Reset
-        </Button>
-        <span
-          className={`font-mono text-[11px] tabular-nums px-1.5 py-0.5 rounded ${
-            userTimer.running
-              ? "text-t-text bg-panel"
-              : "text-t-muted"
-          }`}
-          title="Manual countdown"
-        >
-          {fmt(displaySecs)}
-        </span>
-      </div>
 
       <Separator orientation="vertical" className="h-4" />
 

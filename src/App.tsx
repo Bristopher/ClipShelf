@@ -165,7 +165,6 @@ function App() {
             onAutoWipeChange={(v) => updateConfig({ auto_wipe_enabled: v }).then(setConfig)}
             onWipe={clear}
             onRestore={restore}
-            configuredSecs={initialSecs}
           />
         </main>
         <TimerDisplay

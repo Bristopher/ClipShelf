@@ -62,7 +62,18 @@ pub fn parse_hotkey(binding: &str) -> Result<HotkeyBinding, String> {
 }
 
 pub fn key_name_to_vk(name: &str) -> Result<u32, String> {
-    match name.to_lowercase().as_str() {
+    let lower = name.to_lowercase();
+    // Single ASCII letter a-z → VK 0x41..0x5A
+    if lower.len() == 1 {
+        let c = lower.chars().next().unwrap();
+        if c.is_ascii_alphabetic() {
+            return Ok(0x41 + (c.to_ascii_uppercase() as u32 - 'A' as u32));
+        }
+        if c.is_ascii_digit() {
+            return Ok(0x30 + (c as u32 - '0' as u32));
+        }
+    }
+    match lower.as_str() {
         "f1" => Ok(0x70),
         "f2" => Ok(0x71),
         "f3" => Ok(0x72),
@@ -87,16 +98,32 @@ pub fn key_name_to_vk(name: &str) -> Result<u32, String> {
         "f22" => Ok(0x85),
         "f23" => Ok(0x86),
         "f24" => Ok(0x87),
-        "0" => Ok(0x30),
-        "1" => Ok(0x31),
-        "2" => Ok(0x32),
-        "3" => Ok(0x33),
-        "4" => Ok(0x34),
-        "5" => Ok(0x35),
-        "6" => Ok(0x36),
-        "7" => Ok(0x37),
-        "8" => Ok(0x38),
-        "9" => Ok(0x39),
+        // Common named keys produced by KeybindInput (e.target.key strings).
+        "space" | " " => Ok(0x20),
+        "enter" => Ok(0x0D),
+        "tab" => Ok(0x09),
+        "backspace" => Ok(0x08),
+        "delete" => Ok(0x2E),
+        "insert" => Ok(0x2D),
+        "home" => Ok(0x24),
+        "end" => Ok(0x23),
+        "pageup" => Ok(0x21),
+        "pagedown" => Ok(0x22),
+        "arrowleft" => Ok(0x25),
+        "arrowup" => Ok(0x26),
+        "arrowright" => Ok(0x27),
+        "arrowdown" => Ok(0x28),
+        "`" => Ok(0xC0),
+        "-" => Ok(0xBD),
+        "=" => Ok(0xBB),
+        "[" => Ok(0xDB),
+        "]" => Ok(0xDD),
+        "\\" => Ok(0xDC),
+        ";" => Ok(0xBA),
+        "'" => Ok(0xDE),
+        "," => Ok(0xBC),
+        "." => Ok(0xBE),
+        "/" => Ok(0xBF),
         other => Err(format!("Unknown key name: '{}'", other)),
     }
 }
