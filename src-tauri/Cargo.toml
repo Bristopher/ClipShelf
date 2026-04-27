@@ -1,6 +1,6 @@
 [package]
 name = "gkey-mover-v2"
-version = "2.0.6"
+version = "2.0.7"
 description = "GKey Mover - Sort/rename OBS clips via G-key hotkeys"
 authors = ["cbuzi"]
 edition = "2021"
@@ -45,6 +45,8 @@ windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
     "Win32_System_LibraryLoader",
     "Win32_System_Registry",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_Threading",
 ] }
 
 [dev-dependencies]
