@@ -6,14 +6,24 @@ const appWindow = getCurrentWindow();
 
 interface WindowChromeProps {
   title: string;
+  /** Return false to block hiding (e.g. unsaved changes). Default = hide. */
+  onCloseRequest?: () => boolean | Promise<boolean>;
 }
 
 /** Themed title bar for secondary windows (settings, first-run).
  *  Drag, minimize, maximize-toggle, and close (hide). Matches main app. */
-export function WindowChrome({ title }: WindowChromeProps) {
+export function WindowChrome({ title, onCloseRequest }: WindowChromeProps) {
   const startDrag = (e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest("button")) return;
     appWindow.startDragging();
+  };
+
+  const handleClose = async () => {
+    if (onCloseRequest) {
+      const allow = await onCloseRequest();
+      if (allow === false) return;
+    }
+    appWindow.hide();
   };
 
   return (
@@ -43,7 +53,7 @@ export function WindowChrome({ title }: WindowChromeProps) {
           <Square className="h-3 w-3" />
         </button>
         <button
-          onClick={() => appWindow.hide()}
+          onClick={handleClose}
           title="Close"
           className="h-full w-11 flex items-center justify-center text-t-muted hover:bg-red-600 hover:text-white transition-colors"
         >

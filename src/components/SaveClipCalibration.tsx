@@ -3,7 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { startCalibration, cancelCalibration, updateConfig } from "@/lib/commands";
+import { startCalibration, cancelCalibration } from "@/lib/commands";
 import type { CalibrationSampleEvent, AppConfig } from "@/types";
 
 interface Props {
@@ -66,14 +66,15 @@ export function SaveClipCalibration({ config, onConfigChange }: Props) {
     setRunning(false);
   };
 
-  const applySuggested = async () => {
+  const applySuggested = () => {
     if (!summary) return;
-    // Pick worst + 50% headroom, rounded up, min 2s.
+    // Pick worst + 50% headroom, rounded up, min 2s. Sets the draft only —
+    // user still needs to click Save in the settings bar to persist.
     const suggested = Math.max(2, Math.ceil((summary.worstMs * 1.5) / 1000));
-    const updated = await updateConfig({
+    onConfigChange({
+      ...config,
       save_clip_health_check_timeout_secs: suggested,
     });
-    onConfigChange(updated);
   };
 
   const fmt = (ms: number) => `${(ms / 1000).toFixed(2)}s`;

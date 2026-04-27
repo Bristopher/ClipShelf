@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button";
 import { Folder } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getVersion } from "@tauri-apps/api/app";
-import { updateConfig } from "@/lib/commands";
 import { ThemePanel } from "@/components/ThemePanel";
 import { KeybindInput } from "@/components/KeybindInput";
 import { SaveClipCalibration } from "@/components/SaveClipCalibration";
@@ -26,15 +25,19 @@ export function SettingsForm({ config, onConfigChange }: SettingsFormProps) {
     getVersion().then(setVersion).catch(console.error);
   }, []);
 
-  const update = async (partial: Partial<AppConfig>) => {
-    const updated = await updateConfig(partial);
-    onConfigChange(updated);
+  // Updates the in-memory draft only — persistence happens when the user
+  // clicks Save in the parent's button bar. ThemePanel is the one
+  // exception: its actions write to disk immediately because theme state
+  // (custom themes, import/export) is heavy enough that a draft model
+  // would be confusing.
+  const update = (partial: Partial<AppConfig>) => {
+    onConfigChange({ ...config, ...partial });
   };
 
   const pickFolder = async (field: keyof AppConfig) => {
     const selected = await open({ directory: true });
     if (selected) {
-      await update({ [field]: selected });
+      update({ [field]: selected });
     }
   };
 
