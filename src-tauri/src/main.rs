@@ -4,41 +4,44 @@
 fn main() {
     // Tauri's NSIS template, when invoked by the updater (passive + /R),
     // calls nsis_tauri_utils::RunAsUser from .onInstSuccess to relaunch
-    // the new binary BEFORE the installer process has actually exited.
-    // The newly-launched app then races the installer, holding handles
-    // on files the installer is still finalizing — install fails or the
-    // user sees the app pop up mid-install.
+    // the new binary BEFORE the installer process has fully exited. If
+    // the new app boots its backend during that window it races the
+    // installer's final cleanup and the install fails.
     //
-    // Fix: at the very top of main(), if our parent is the NSIS installer
-    // we block on WaitForSingleObject until it exits. We've loaded nothing
-    // yet (no Tauri builder, no backend, no watcher), so we hold no
-    // locks. Once the installer exits, fall through to normal startup —
-    // same process, no helper, no detached cmd, no second launch.
+    // Fix: at the very top of main(), detect "I was launched by our own
+    // installer" and exit immediately. Nothing initializes — no Tauri
+    // builder, no watcher, no window — so the installer can finish
+    // cleanly. Tradeoff: the user has to launch the app themselves
+    // after the update completes (Start menu, pinned shortcut, tray
+    // icon). We tried WaitForSingleObject on the parent installer to
+    // get a free auto-relaunch — it deadlocked because nsis_tauri_utils
+    // ::RunAsUser blocks the installer thread on the spawned child.
     #[cfg(windows)]
-    wait_for_installer_parent();
+    if launched_by_installer() {
+        std::process::exit(0);
+    }
 
     gkey_mover_v2_lib::run()
 }
 
-/// If our parent process is an NSIS installer for this app, block until
-/// it exits before returning. Returns immediately (no wait) for any
-/// other parent — normal launches, manual installer runs, etc.
+/// True if our parent process looks like the Tauri NSIS installer for
+/// this app — files matching `*-setup.exe`, the pattern Tauri uses for
+/// `<product>_<version>_<arch>-setup.exe`. After the installer exits
+/// the parent handle is gone, so a manual launch (Start menu, pinned
+/// shortcut, etc.) returns false and boots normally.
 #[cfg(windows)]
-fn wait_for_installer_parent() {
+fn launched_by_installer() -> bool {
     use std::os::windows::ffi::OsStringExt;
     use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::System::Diagnostics::ToolHelp::{
         CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
         TH32CS_SNAPPROCESS,
     };
-    use windows_sys::Win32::System::Threading::{
-        OpenProcess, WaitForSingleObject, INFINITE, PROCESS_SYNCHRONIZE,
-    };
 
     unsafe {
         let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
         if snapshot == INVALID_HANDLE_VALUE {
-            return;
+            return false;
         }
 
         let mut entry: PROCESSENTRY32W = std::mem::zeroed();
@@ -58,7 +61,7 @@ fn wait_for_installer_parent() {
             }
         }
 
-        let mut parent_is_installer = false;
+        let mut is_installer = false;
         if let Some(ppid) = parent_pid {
             let mut e2: PROCESSENTRY32W = std::mem::zeroed();
             e2.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
@@ -71,9 +74,8 @@ fn wait_for_installer_parent() {
                             .position(|&c| c == 0)
                             .unwrap_or(e2.szExeFile.len());
                         let name = std::ffi::OsString::from_wide(&e2.szExeFile[..len]);
-                        // Tauri NSIS pattern: <product>_<version>_<arch>-setup.exe
                         if name.to_string_lossy().to_lowercase().ends_with("-setup.exe") {
-                            parent_is_installer = true;
+                            is_installer = true;
                         }
                         break;
                     }
@@ -84,22 +86,6 @@ fn wait_for_installer_parent() {
             }
         }
         CloseHandle(snapshot);
-
-        if !parent_is_installer {
-            return;
-        }
-        let ppid = match parent_pid {
-            Some(p) => p,
-            None => return,
-        };
-
-        // PROCESS_SYNCHRONIZE is the minimum access right needed for
-        // WaitForSingleObject on a process handle.
-        let parent_handle = OpenProcess(PROCESS_SYNCHRONIZE, 0, ppid);
-        if parent_handle.is_null() {
-            return;
-        }
-        WaitForSingleObject(parent_handle, INFINITE);
-        CloseHandle(parent_handle);
+        is_installer
     }
 }

@@ -74,26 +74,41 @@ relaunch — which is why the bug only reproduces via the updater.
 ## The fix
 
 At the very top of `fn main()`, **before any backend or window initializes**,
-check the parent process. If it's the NSIS installer for this app, block
-on `WaitForSingleObject(parent_handle, INFINITE)` until the installer
-exits, then fall through to normal startup.
+check the parent process. If it's the NSIS installer for this app,
+`process::exit(0)` immediately. Nothing else runs — no Tauri builder,
+no tokio runtime, no watcher, no window, no file handles. The
+installer's `RunAsUser` call effectively becomes a no-op, the installer
+finishes its cleanup, and the install completes successfully.
 
-Why this works:
+**Tradeoff: the user has to launch the app themselves after the
+update** (Start menu, pinned shortcut, tray icon if it persists). The
+auto-relaunch is given up to make the install reliable.
 
-- We've loaded **nothing** yet — no Tauri builder, no tokio runtime, no
-  watcher, no window, no file handles. The OS holds an EXECUTE mapping
-  on our own EXE image, but that doesn't conflict with anything the
-  installer is finalizing (registry writes, shortcut creation, its own
-  cleanup).
-- `WaitForSingleObject` is a deterministic signal, not a sleep heuristic.
-  The instant the installer exits, we proceed.
-- It's the **same process** that boots the app — no helper, no detached
-  cmd, no second launch. The OS process tree stays clean.
-- Manual installer runs don't pass `/R` so `.onInstSuccess` doesn't
-  relaunch anyway; the wait code path simply never executes.
-- Normal launches (Start menu, pinned shortcut, taskbar) have a parent
-  like `explorer.exe` — the parent-name check fails fast and the
-  function returns in microseconds.
+### Why not wait for the installer to exit and then continue?
+
+The intuitive "fix" is to block on `WaitForSingleObject(parent_handle,
+INFINITE)` until the installer process exits, then fall through to
+normal startup. Same process, no helper, free auto-relaunch — sounds
+ideal.
+
+**It deadlocks.** `nsis_tauri_utils::RunAsUser` (the function called by
+`.onInstSuccess`) blocks the installer thread on the spawned child for
+some part of its lifetime — the installer is waiting on us, we're
+waiting on the installer, neither makes progress. The symptom is an
+invisible app process that never appears in the tray and an installer
+window that never closes.
+
+Don't waste time trying clever variants of the wait approach. The fix
+is `process::exit(0)`.
+
+### Why not spawn a detached helper to relaunch later?
+
+A `cmd.exe /c timeout && start ""` helper that runs after exit "works,"
+but it's a stupid pattern: separate process the OS has to manage,
+arbitrary 4-second sleep heuristic, more surface area for things to go
+wrong. Don't do this. Either accept the manual-launch tradeoff or, if
+your installer is Velopack-style with explicit lifecycle flags, use the
+flag pattern below.
 
 ### Implementation
 
@@ -114,26 +129,24 @@ windows-sys = { version = "0.59", features = [
 
 fn main() {
     #[cfg(windows)]
-    wait_for_installer_parent();
+    if launched_by_installer() {
+        std::process::exit(0);
+    }
 
     your_lib::run()
 }
 
 #[cfg(windows)]
-fn wait_for_installer_parent() {
+fn launched_by_installer() -> bool {
     use std::os::windows::ffi::OsStringExt;
     use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::System::Diagnostics::ToolHelp::{
         CreateToolhelp32Snapshot, Process32FirstW, Process32NextW,
         PROCESSENTRY32W, TH32CS_SNAPPROCESS,
     };
-    use windows_sys::Win32::System::Threading::{
-        OpenProcess, WaitForSingleObject, INFINITE, PROCESS_SYNCHRONIZE,
-    };
-
     unsafe {
         let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-        if snapshot == INVALID_HANDLE_VALUE { return; }
+        if snapshot == INVALID_HANDLE_VALUE { return false; }
 
         // Pass 1: find our PID's parent.
         let mut entry: PROCESSENTRY32W = std::mem::zeroed();
@@ -151,7 +164,7 @@ fn wait_for_installer_parent() {
         }
 
         // Pass 2: look up the parent's exe name.
-        let mut parent_is_installer = false;
+        let mut is_installer = false;
         if let Some(ppid) = parent_pid {
             let mut e2: PROCESSENTRY32W = std::mem::zeroed();
             e2.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
@@ -163,7 +176,7 @@ fn wait_for_installer_parent() {
                         let name = std::ffi::OsString::from_wide(&e2.szExeFile[..len]);
                         // Tauri NSIS pattern: <product>_<version>_<arch>-setup.exe
                         if name.to_string_lossy().to_lowercase().ends_with("-setup.exe") {
-                            parent_is_installer = true;
+                            is_installer = true;
                         }
                         break;
                     }
@@ -172,21 +185,15 @@ fn wait_for_installer_parent() {
             }
         }
         CloseHandle(snapshot);
-
-        if !parent_is_installer { return; }
-        let Some(ppid) = parent_pid else { return };
-
-        // PROCESS_SYNCHRONIZE is the minimum right needed for
-        // WaitForSingleObject on a process handle.
-        let h = OpenProcess(PROCESS_SYNCHRONIZE, 0, ppid);
-        if h.is_null() { return; }
-        WaitForSingleObject(h, INFINITE);
-        CloseHandle(h);
+        is_installer
     }
 }
 ```
 
-That's it. No helper process, no sleep, no second launch.
+`Win32_System_Threading` is still useful in this Cargo.toml block if
+you need other threading types, but the minimal fix only requires
+`Win32_System_Diagnostics_ToolHelp` and `Win32_Foundation` (already
+present in most Tauri projects).
 
 ## Sequence with the fix
 
@@ -203,11 +210,11 @@ POSTINSTALL hook
   ↓
 new app: main() entered
   ↓
-new app: parent is "MyApp_2.0.6_x64-setup.exe" → WaitForSingleObject
+new app: parent is "MyApp_2.0.6_x64-setup.exe" → process::exit(0)
   ↓
-installer window closes; installer process exits
+.onInstSuccess returns → installer cleans up and exits → install OK
   ↓
-new app: WaitForSingleObject returns → falls through to run() → boots normally
+user clicks Start menu / pinned shortcut → app boots normally
 ```
 
 ## What about non-Tauri Windows apps?
