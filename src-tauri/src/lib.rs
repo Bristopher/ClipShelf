@@ -23,7 +23,7 @@ use tokio::sync::mpsc;
 use config::AppConfig;
 use events::*;
 use hotkeys::HotkeyAction;
-use obs_ws::{ObsWsCommand, ObsWsEvent};
+use obs_ws::ObsWsEvent;
 use state::{AppState, AppStateInner, ChannelState, CurrentFile};
 use timer::{CountUpCommand, TimerCommand};
 use watcher::{WatcherCommand, WatcherEvent};
@@ -31,6 +31,16 @@ use watcher::{WatcherCommand, WatcherEvent};
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // Must be the first plugin. A second launch of the exe forwards to
+        // this instance (we surface the existing window) and exits — no more
+        // duplicate watchers or hotkey-registration fights.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
@@ -120,12 +130,21 @@ pub fn run() {
                 hotkeys::spawn_hotkey_listener(initial_bindings)
                     .expect("Failed to spawn hotkey listener");
 
+            // Spawn the OBS WebSocket actor unconditionally — while disabled
+            // it just idles waiting for a Configure from update_config, so
+            // enabling it in Settings works without an app restart.
+            let (obs_cmd_tx, mut obs_event_rx) = obs_ws::spawn_obs_ws(
+                config.obs_websocket_enabled,
+                config.obs_websocket_password.clone(),
+            );
+
             // Create ChannelState
             let channel_state = ChannelState {
                 timer_tx: timer_tx.clone(),
                 user_timer_tx: user_timer_tx.clone(),
                 watcher_tx: watcher_tx.clone(),
                 count_up_tx: count_up_tx.clone(),
+                obs_cmd_tx: obs_cmd_tx.clone(),
                 hotkey_controller,
             };
             app.manage(channel_state);
@@ -239,17 +258,22 @@ pub fn run() {
                 tauri::async_runtime::spawn(async move {
                     while let Some(action) = hotkey_rx.recv().await {
                         match action {
-                            HotkeyAction::MoveG1 => {
-                                let _ = app_handle
-                                    .emit("hotkey-triggered", serde_json::json!({"key": 1}));
-                            }
-                            HotkeyAction::MoveG2 => {
-                                let _ = app_handle
-                                    .emit("hotkey-triggered", serde_json::json!({"key": 2}));
-                            }
-                            HotkeyAction::MoveG3 => {
-                                let _ = app_handle
-                                    .emit("hotkey-triggered", serde_json::json!({"key": 3}));
+                            // G1-G3 are handled fully in Rust — no webview
+                            // round-trip, so a hotkey works even while the
+                            // frontend is still loading (or hung). The move
+                            // does blocking IO with retry sleeps, so it runs
+                            // on the blocking pool.
+                            HotkeyAction::MoveG1 | HotkeyAction::MoveG2 | HotkeyAction::MoveG3 => {
+                                let key = match action {
+                                    HotkeyAction::MoveG1 => 1,
+                                    HotkeyAction::MoveG2 => 2,
+                                    _ => 3,
+                                };
+                                let app = app_handle.clone();
+                                let st = state.clone();
+                                tauri::async_runtime::spawn_blocking(move || {
+                                    commands::do_press_gkey(&app, &st, key);
+                                });
                             }
                             HotkeyAction::Rename => {
                                 let _ = app_handle
@@ -288,20 +312,12 @@ pub fn run() {
                 });
             }
 
-            // Spawn OBS WebSocket if enabled
-            if config.obs_websocket_enabled && !config.obs_websocket_password.is_empty() {
+            // Handle OBS WebSocket events (actor spawned above ChannelState)
+            {
                 let app_handle = app_handle.clone();
                 let state = app_state.clone();
-                let (obs_cmd_tx, mut obs_event_rx) =
-                    obs_ws::spawn_obs_ws(config.obs_websocket_password.clone(), 5);
+                let timer_tx = timer_tx.clone();
 
-                // Send initial connect command
-                let obs_cmd_tx_clone = obs_cmd_tx.clone();
-                tauri::async_runtime::spawn(async move {
-                    let _ = obs_cmd_tx_clone.send(ObsWsCommand::Connect).await;
-                });
-
-                // Handle OBS events
                 tauri::async_runtime::spawn(async move {
                     while let Some(event) = obs_event_rx.recv().await {
                         match event {
@@ -342,15 +358,32 @@ pub fn run() {
                                 );
                             }
                             ObsWsEvent::ReplayBufferSaved { path } => {
-                                // OBS reports file saved - the watcher should also
-                                // pick this up as a FileCreated event.
-                                let mut s = state.lock().unwrap();
-                                let entry = s.logger.log(
-                                    LogLevel::Info,
-                                    format!("OBS replay saved: {}", path),
-                                    LogCategory::ObsWebSocket,
-                                );
-                                let _ = app_handle.emit("log-entry", &entry);
+                                // OBS tells us the exact saved path — inject it
+                                // straight into the file pipeline. Faster than
+                                // the watcher and immune to notify wedging; the
+                                // dedup guard in handle_file_created swallows
+                                // whichever of the two signals arrives second.
+                                let config = {
+                                    let mut s = state.lock().unwrap();
+                                    let entry = s.logger.log(
+                                        LogLevel::Info,
+                                        format!("OBS replay saved: {}", path),
+                                        LogCategory::ObsWebSocket,
+                                    );
+                                    let _ = app_handle.emit("log-entry", &entry);
+                                    s.config.clone()
+                                };
+                                let file_path = PathBuf::from(&path);
+                                if watcher::is_video_file(&file_path) {
+                                    handle_file_created(
+                                        &app_handle,
+                                        &state,
+                                        &timer_tx,
+                                        &config,
+                                        file_path,
+                                    )
+                                    .await;
+                                }
                             }
                             ObsWsEvent::AuthError { message } => {
                                 let mut s = state.lock().unwrap();
@@ -506,6 +539,20 @@ async fn handle_file_created(
     config: &AppConfig,
     path: PathBuf,
 ) {
+    // Dedup: the same clip can be reported twice — OBS WebSocket + folder
+    // watcher (or the health-check rescan). First signal wins; anything
+    // re-reporting the same raw path within 10s is dropped.
+    {
+        let s = state.lock().unwrap();
+        if let (Some(prev), Some(at)) = (&s.last_created_path, s.last_file_created_at) {
+            if *prev == path
+                && at.elapsed().unwrap_or_default() < std::time::Duration::from_secs(10)
+            {
+                return;
+            }
+        }
+    }
+
     let size_mb = mover::file_size_mb(&path);
     let is_warning = size_mb < 6.5;
 
@@ -529,6 +576,7 @@ async fn handle_file_created(
         s.bind_chosen = None;
         let now = std::time::SystemTime::now();
         s.last_file_created_at = Some(now);
+        s.last_created_path = Some(path.clone());
 
         // Calibration recording — if a save was pending, record the delta.
         let mut emit: Option<serde_json::Value> = None;

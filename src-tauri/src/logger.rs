@@ -34,6 +34,25 @@ impl AppLogger {
         }
     }
 
+    /// Re-derive the log directory and enabled flag after a config change,
+    /// keeping the in-memory history/display buffers intact. Without this,
+    /// changing the videos folder in Settings left daily file logs writing
+    /// to the old folder until an app restart.
+    pub fn reconfigure(&mut self, videos_folder: &str, log_enabled: bool) {
+        self.log_enabled = log_enabled;
+        self.log_dir = if !videos_folder.is_empty() {
+            let dir = PathBuf::from(videos_folder).join("logs");
+            if let Err(e) = fs::create_dir_all(&dir) {
+                eprintln!("Failed to create log dir: {}", e);
+                None
+            } else {
+                Some(dir)
+            }
+        } else {
+            None
+        };
+    }
+
     pub fn log(
         &mut self,
         level: LogLevel,

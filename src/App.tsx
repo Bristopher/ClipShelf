@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { getConfig, updateConfig, pressGkey, setWindowOpacity } from "@/lib/commands";
+import { getConfig, updateConfig, setWindowOpacity } from "@/lib/commands";
 import { EVENTS } from "@/lib/events";
 import { useEventLog } from "@/hooks/useEventLog";
 import { useTimer } from "@/hooks/useTimer";
@@ -54,19 +54,9 @@ function App() {
     };
   }, []);
 
-  // Handle hotkey-triggered events for G1-G3 (call press_gkey command)
-  useEffect(() => {
-    const unlisten = listen<{ key: number }>(EVENTS.HOTKEY_TRIGGERED, (event) => {
-      const key = event.payload.key;
-      if (key >= 1 && key <= 3) {
-        pressGkey(key);
-      }
-      // key=4 (rename) is handled by RenameDialog
-    });
-    return () => {
-      unlisten.then((fn) => fn());
-    };
-  }, []);
+  // G1-G3 hotkeys are handled entirely in Rust now (no webview round-trip).
+  // The hotkey-triggered event only remains for key=4 (rename), which the
+  // RenameDialog listens for since it needs UI.
 
   // Auto-wipe on timer expiry — listener mounts once; config + clear are
   // read via refs so we don't re-register on every render.

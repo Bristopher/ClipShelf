@@ -1,7 +1,7 @@
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, SystemTime};
 use tauri;
 use tokio::sync::mpsc;
 
@@ -59,15 +59,19 @@ async fn watcher_actor(
     // --- Sleep/resume detector -------------------------------------------
     // Every second we tick; if the wall-clock delta exceeds 10 s we send
     // Restart to ourselves, which handles the case where the OS suspends and
-    // the notify backend stops delivering events.
+    // the notify backend stops delivering events. Uses SystemTime, not
+    // Instant — Instant is monotonic and may not advance across a Windows
+    // suspend, which would make the gap invisible to this check.
     {
         let cmd_tx_sleep = cmd_tx.clone();
         tauri::async_runtime::spawn(async move {
-            let mut last_tick = Instant::now();
+            let mut last_tick = SystemTime::now();
             loop {
                 tokio::time::sleep(Duration::from_secs(1)).await;
-                let now = Instant::now();
-                let delta = now.duration_since(last_tick);
+                let now = SystemTime::now();
+                let delta = now
+                    .duration_since(last_tick)
+                    .unwrap_or(Duration::ZERO);
                 if delta > Duration::from_secs(10) {
                     // System likely woke from sleep; restart the watcher.
                     let _ = cmd_tx_sleep.send(WatcherCommand::Restart).await;

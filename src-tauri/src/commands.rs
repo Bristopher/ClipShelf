@@ -4,6 +4,7 @@ use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder
 use crate::config::AppConfig;
 use crate::events::*;
 use crate::mover;
+use crate::obs_ws::ObsWsCommand;
 use crate::sound;
 use crate::state::{AppState, ChannelState, CurrentFile};
 use crate::theme::{Theme, ThemeExport, THEME_SCHEMA};
@@ -23,26 +24,41 @@ pub fn update_config(
     channels: State<'_, ChannelState>,
     app: AppHandle,
 ) -> Result<AppConfig, String> {
-    let prev_folder = {
-        let s = state.lock().map_err(|e| e.to_string())?;
-        s.config.videos_folder.clone()
-    };
-
     let mut s = state.lock().map_err(|e| e.to_string())?;
+    let prev_folder = s.config.videos_folder.clone();
+    let prev_log_enabled = s.config.log_file_enabled;
+    let prev_obs = (
+        s.config.obs_websocket_enabled,
+        s.config.obs_websocket_password.clone(),
+    );
     s.config.merge_partial(partial);
     let path = s.config_path.clone();
     s.config.save_to(&path).map_err(|e| e.to_string())?;
     let config = s.config.clone();
+
+    // Repoint the file logger — it captured the videos folder at startup and
+    // would otherwise keep writing daily logs to the old location.
+    if config.videos_folder != prev_folder || config.log_file_enabled != prev_log_enabled {
+        s.logger
+            .reconfigure(&config.videos_folder, config.log_file_enabled);
+    }
     drop(s);
 
     // If the videos folder changed (including the first-run case where it
     // was empty at startup and is now set), (re)start the file watcher —
-    // otherwise new clips are never seen until app restart.
-    if config.videos_folder != prev_folder && !config.videos_folder.is_empty() {
-        let path = std::path::PathBuf::from(&config.videos_folder);
+    // otherwise new clips are never seen until app restart. A cleared
+    // folder stops the watcher instead of leaving it on the old path.
+    if config.videos_folder != prev_folder {
         let watcher_tx = channels.watcher_tx.clone();
+        let cmd = if config.videos_folder.is_empty() {
+            WatcherCommand::Stop
+        } else {
+            WatcherCommand::Start {
+                path: std::path::PathBuf::from(&config.videos_folder),
+            }
+        };
         tauri::async_runtime::spawn(async move {
-            let _ = watcher_tx.send(WatcherCommand::Start { path }).await;
+            let _ = watcher_tx.send(cmd).await;
         });
     }
 
@@ -52,13 +68,39 @@ pub fn update_config(
         .hotkey_controller
         .reload(crate::hotkeys::bindings_from_config(&config));
 
+    // Hot-apply OBS WebSocket settings — the actor connects/disconnects/
+    // reconnects with new credentials without an app restart.
+    let new_obs = (
+        config.obs_websocket_enabled,
+        config.obs_websocket_password.clone(),
+    );
+    if new_obs != prev_obs {
+        let obs_tx = channels.obs_cmd_tx.clone();
+        tauri::async_runtime::spawn(async move {
+            let _ = obs_tx
+                .send(ObsWsCommand::Configure {
+                    enabled: new_obs.0,
+                    password: new_obs.1,
+                })
+                .await;
+        });
+    }
+
     let _ = app.emit("config-changed", &config);
     Ok(config)
 }
 
 #[tauri::command]
 pub fn press_gkey(key: u8, state: State<'_, AppState>, app: AppHandle) -> Result<(), String> {
-    let mut s = state.lock().map_err(|e| e.to_string())?;
+    do_press_gkey(&app, state.inner(), key);
+    Ok(())
+}
+
+/// Core G-key move/rename logic. A free function (not just a command) so the
+/// global hotkey handler can invoke it directly in Rust — a hotkey must work
+/// even while the webview is still loading or wedged.
+pub fn do_press_gkey(app: &AppHandle, state: &AppState, key: u8) {
+    let Ok(mut s) = state.lock() else { return };
     let gkey_label = format!("G{}", key);
     s.bind_chosen = Some(gkey_label.clone());
 
@@ -93,7 +135,7 @@ pub fn press_gkey(key: u8, state: State<'_, AppState>, app: AppHandle) -> Result
                 let resource_dir = app.path().resource_dir().unwrap_or_default();
                 sound::play_error(&s.config.error_sound_custom, &resource_dir);
             }
-            return Ok(());
+            return;
         }
     };
 
@@ -108,7 +150,7 @@ pub fn press_gkey(key: u8, state: State<'_, AppState>, app: AppHandle) -> Result
 
     match mover::move_or_rename_file(&file_path, key, &config) {
         Ok(result) => {
-            let mut s = state.lock().map_err(|e| e.to_string())?;
+            let Ok(mut s) = state.lock() else { return };
             s.current_file = Some(CurrentFile {
                 path: result.new_path.clone(),
                 moved_path: None,
@@ -149,7 +191,7 @@ pub fn press_gkey(key: u8, state: State<'_, AppState>, app: AppHandle) -> Result
             }
         }
         Err(e) => {
-            let mut s = state.lock().map_err(|e| e.to_string())?;
+            let Ok(mut s) = state.lock() else { return };
             let entry = s.logger.log(
                 LogLevel::Error,
                 format!("Move failed: {}", e),
@@ -158,7 +200,6 @@ pub fn press_gkey(key: u8, state: State<'_, AppState>, app: AppHandle) -> Result
             let _ = app.emit("log-entry", &entry);
         }
     }
-    Ok(())
 }
 
 #[tauri::command]

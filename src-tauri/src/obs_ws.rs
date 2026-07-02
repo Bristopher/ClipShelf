@@ -17,8 +17,9 @@ pub enum ObsWsEvent {
 
 #[derive(Debug)]
 pub enum ObsWsCommand {
-    Connect,
-    Disconnect,
+    /// Update desired state. The actor connects, disconnects, or reconnects
+    /// with fresh credentials to match — no app restart needed.
+    Configure { enabled: bool, password: String },
 }
 
 pub fn build_auth_string(password: &str, salt: &str, challenge: &str) -> String {
@@ -37,76 +38,127 @@ pub fn build_auth_string(password: &str, salt: &str, challenge: &str) -> String 
     STANDARD.encode(auth_bytes)
 }
 
+/// Spawns the OBS WebSocket actor. Always spawned at startup regardless of
+/// config — while disabled it idles waiting for a `Configure`; while enabled
+/// it reconnects forever with capped backoff, so OBS starting *after* this
+/// app (or restarting mid-session) is picked up automatically.
 pub fn spawn_obs_ws(
+    enabled: bool,
     password: String,
-    max_retries: u32,
 ) -> (mpsc::Sender<ObsWsCommand>, mpsc::Receiver<ObsWsEvent>) {
-    let (cmd_tx, mut cmd_rx) = mpsc::channel::<ObsWsCommand>(16);
+    let (cmd_tx, cmd_rx) = mpsc::channel::<ObsWsCommand>(16);
     let (event_tx, event_rx) = mpsc::channel::<ObsWsEvent>(64);
 
-    tauri::async_runtime::spawn(async move {
-        while let Some(cmd) = cmd_rx.recv().await {
-            match cmd {
-                ObsWsCommand::Connect => {
-                    let mut retry_count = 0u32;
-                    loop {
-                        let _ = event_tx
-                            .send(ObsWsEvent::StatusChanged {
-                                status: "connecting".to_string(),
-                                attempt: Some(retry_count + 1),
-                            })
-                            .await;
-
-                        match connect_and_run(&password, event_tx.clone()).await {
-                            Ok(_) => {
-                                // Clean disconnect — stop retrying
-                                break;
-                            }
-                            Err(e) => {
-                                retry_count += 1;
-                                let _ = event_tx
-                                    .send(ObsWsEvent::StatusChanged {
-                                        status: format!("retry-{retry_count}: {e}"),
-                                        attempt: Some(retry_count),
-                                    })
-                                    .await;
-
-                                if retry_count >= max_retries {
-                                    let _ = event_tx
-                                        .send(ObsWsEvent::StatusChanged {
-                                            status: "failed-over".to_string(),
-                                            attempt: Some(retry_count),
-                                        })
-                                        .await;
-                                    break;
-                                }
-
-                                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                            }
-                        }
-                    }
-                }
-                ObsWsCommand::Disconnect => {
-                    // Nothing to do here if not connected; a running
-                    // connect_and_run will handle its own teardown.
-                }
-            }
-        }
-    });
+    tauri::async_runtime::spawn(actor(cmd_rx, event_tx, enabled, password));
 
     (cmd_tx, event_rx)
 }
 
+/// Delay before the next connection attempt. A session that actually
+/// connected resets `attempt` to 0, so a drop mid-session retries fast;
+/// repeated failures back off to a 30s cap (OBS simply not running).
+fn reconnect_delay(attempt: u32) -> std::time::Duration {
+    let secs = match attempt {
+        0 => 3,
+        1 => 5,
+        2 => 10,
+        3 => 20,
+        _ => 30,
+    };
+    std::time::Duration::from_secs(secs)
+}
+
+async fn actor(
+    mut cmd_rx: mpsc::Receiver<ObsWsCommand>,
+    event_tx: mpsc::Sender<ObsWsEvent>,
+    mut enabled: bool,
+    mut password: String,
+) {
+    let mut attempt: u32 = 0;
+
+    loop {
+        if !enabled {
+            let _ = event_tx
+                .send(ObsWsEvent::StatusChanged {
+                    status: "disabled".to_string(),
+                    attempt: None,
+                })
+                .await;
+            match cmd_rx.recv().await {
+                Some(ObsWsCommand::Configure { enabled: e, password: p }) => {
+                    enabled = e;
+                    password = p;
+                    attempt = 0;
+                }
+                None => return,
+            }
+            continue;
+        }
+
+        let _ = event_tx
+            .send(ObsWsEvent::StatusChanged {
+                status: "connecting".to_string(),
+                attempt: Some(attempt + 1),
+            })
+            .await;
+
+        // Run the connection, but stay responsive to Configure — dropping
+        // the connect_and_run future tears the socket down.
+        let mut reconfigured = false;
+        tokio::select! {
+            res = connect_and_run(&password, event_tx.clone()) => {
+                match res {
+                    Ok(was_connected) => attempt = if was_connected { 0 } else { attempt + 1 },
+                    Err(_) => attempt += 1,
+                }
+            }
+            cmd = cmd_rx.recv() => {
+                match cmd {
+                    Some(ObsWsCommand::Configure { enabled: e, password: p }) => {
+                        enabled = e;
+                        password = p;
+                        attempt = 0;
+                        reconfigured = true;
+                    }
+                    None => return,
+                }
+            }
+        }
+        if reconfigured {
+            continue;
+        }
+
+        // Backoff before the next attempt, still responsive to Configure.
+        tokio::select! {
+            _ = tokio::time::sleep(reconnect_delay(attempt)) => {}
+            cmd = cmd_rx.recv() => {
+                match cmd {
+                    Some(ObsWsCommand::Configure { enabled: e, password: p }) => {
+                        enabled = e;
+                        password = p;
+                        attempt = 0;
+                    }
+                    None => return,
+                }
+            }
+        }
+    }
+}
+
+/// Returns `Ok(true)` if the session reached the Identified state before
+/// ending (used to reset reconnect backoff), `Ok(false)` for a clean close
+/// before identifying, `Err` for connection/protocol failures.
 async fn connect_and_run(
     password: &str,
     event_tx: mpsc::Sender<ObsWsEvent>,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let url = "ws://localhost:4455";
     let (ws_stream, _response) = connect_async(url)
         .await
         .map_err(|e| format!("connect failed: {e}"))?;
 
     let (mut write, mut read) = ws_stream.split();
+    let mut identified = false;
 
     while let Some(msg) = read.next().await {
         let msg = match msg {
@@ -186,6 +238,7 @@ async fn connect_and_run(
 
                     // op=2: Identified
                     2 => {
+                        identified = true;
                         let _ = event_tx
                             .send(ObsWsEvent::StatusChanged {
                                 status: "connected".to_string(),
@@ -232,7 +285,7 @@ async fn connect_and_run(
                 let _ = event_tx
                     .send(ObsWsEvent::Disconnected { code, reason })
                     .await;
-                return Ok(());
+                return Ok(identified);
             }
 
             // Ignore ping/pong/binary
@@ -247,7 +300,7 @@ async fn connect_and_run(
             reason: "stream ended".to_string(),
         })
         .await;
-    Ok(())
+    Ok(identified)
 }
 
 #[cfg(test)]

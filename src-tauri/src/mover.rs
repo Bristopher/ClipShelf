@@ -1,8 +1,14 @@
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 use std::thread;
 use std::time::Duration;
 use regex::Regex;
 use crate::config::AppConfig;
+
+static OBS_TIMESTAMP_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(\d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2})").unwrap());
+static SP_TIMESTAMP_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(\d{4}\.\d{2}\.\d{2} - \d{2}\.\d{2}\.\d{2})").unwrap());
 
 // --- MoveResult ---
 
@@ -28,15 +34,13 @@ pub fn get_tag_shorthand(bind_folder_name: &str) -> &str {
 
 pub fn insert_tag_in_filename(filename: &str, tag: &str) -> String {
     // OBS format: "2026-04-15 12-30-00"
-    let obs_re = Regex::new(r"(\d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2})").unwrap();
-    if let Some(m) = obs_re.find(filename) {
+    if let Some(m) = OBS_TIMESTAMP_RE.find(filename) {
         let end = m.end();
         return format!("{} {}{}", &filename[..end], tag, &filename[end..]);
     }
 
     // ShadowPlay format: "2026.04.15 - 12.30.00"
-    let sp_re = Regex::new(r"(\d{4}\.\d{2}\.\d{2} - \d{2}\.\d{2}\.\d{2})").unwrap();
-    if let Some(m) = sp_re.find(filename) {
+    if let Some(m) = SP_TIMESTAMP_RE.find(filename) {
         let end = m.end();
         return format!("{} {}{}", &filename[..end], tag, &filename[end..]);
     }
@@ -63,6 +67,55 @@ pub fn file_size_mb(path: &Path) -> f64 {
 
 pub fn is_file_size_valid(path: &Path, min_size_mb: f64) -> bool {
     file_size_mb(path) >= min_size_mb
+}
+
+// --- Destination helpers ---
+
+/// `std::fs::rename` on Windows silently REPLACES an existing destination —
+/// for a clip mover that means data loss on a name collision. This returns
+/// the path unchanged if free, otherwise appends " (2)", " (3)", … before
+/// the extension until a free name is found.
+pub fn unique_destination(path: &Path) -> PathBuf {
+    if !path.exists() {
+        return path.to_path_buf();
+    }
+    let parent = path.parent().map(Path::to_path_buf).unwrap_or_default();
+    let stem = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("clip")
+        .to_string();
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| format!(".{}", e))
+        .unwrap_or_default();
+    for n in 2u32.. {
+        let candidate = parent.join(format!("{} ({}){}", stem, n, ext));
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    unreachable!()
+}
+
+/// Rename with retries — OBS/ShadowPlay may still hold the file handle for
+/// a moment after the create event fires.
+fn rename_with_retry(from: &Path, to: &Path) -> Result<(), String> {
+    let delays = [200u64, 500, 1000];
+    let mut last_err = String::new();
+    for (attempt, &delay_ms) in delays.iter().enumerate() {
+        match std::fs::rename(from, to) {
+            Ok(_) => return Ok(()),
+            Err(e) => {
+                last_err = e.to_string();
+                if attempt < delays.len() - 1 {
+                    thread::sleep(Duration::from_millis(delay_ms));
+                }
+            }
+        }
+    }
+    Err(format!("Failed to move/rename file after 3 attempts: {}", last_err))
 }
 
 // --- move_or_rename_file ---
@@ -105,30 +158,14 @@ pub fn move_or_rename_file(
             .map_err(|e| format!("Failed to create sort directory: {}", e))?;
         sort_dir.join(&new_filename)
     };
+    let new_path = unique_destination(&new_path);
 
-    // Retry up to 3 times with increasing delays
-    let delays = [200u64, 500, 1000];
-    let mut last_err = String::new();
-
-    for (attempt, &delay_ms) in delays.iter().enumerate() {
-        match std::fs::rename(file_path, &new_path) {
-            Ok(_) => {
-                return Ok(MoveResult {
-                    original_path: file_path.to_path_buf(),
-                    new_path,
-                    tag_applied: tag.to_string(),
-                });
-            }
-            Err(e) => {
-                last_err = e.to_string();
-                if attempt < delays.len() - 1 {
-                    thread::sleep(Duration::from_millis(delay_ms));
-                }
-            }
-        }
-    }
-
-    Err(format!("Failed to move/rename file after 3 attempts: {}", last_err))
+    rename_with_retry(file_path, &new_path)?;
+    Ok(MoveResult {
+        original_path: file_path.to_path_buf(),
+        new_path,
+        tag_applied: tag.to_string(),
+    })
 }
 
 // --- rename_file_with_text ---
@@ -154,16 +191,32 @@ pub fn rename_file_with_text(file_path: &Path, text: &str) -> Result<MoveResult,
         .unwrap_or_default();
 
     let new_filename = format!("{} - {}{}", stem, text, ext);
-    let new_path = parent.join(&new_filename);
+    let new_path = unique_destination(&parent.join(&new_filename));
 
-    std::fs::rename(file_path, &new_path)
-        .map_err(|e| format!("Failed to rename file: {}", e))?;
+    rename_with_retry(file_path, &new_path)?;
 
     Ok(MoveResult {
         original_path: file_path.to_path_buf(),
         new_path,
         tag_applied: text.to_string(),
     })
+}
+
+/// Restore a previously moved/renamed file back to where it came from.
+/// Used by undo. Collision-safe: if the original name has been re-taken
+/// (e.g. OBS saved a new clip with the same timestamp), the restored file
+/// gets a " (2)" suffix instead of clobbering it.
+pub fn restore_file(from: &Path, to: &Path) -> Result<PathBuf, String> {
+    if !from.exists() {
+        return Err(format!("File no longer exists: {}", from.display()));
+    }
+    if let Some(parent) = to.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create directory: {}", e))?;
+    }
+    let target = unique_destination(to);
+    rename_with_retry(from, &target)?;
+    Ok(target)
 }
 
 // --- Tests ---
@@ -284,6 +337,61 @@ mod tests {
             "myclip - highlight.mp4"
         );
         assert_eq!(result.tag_applied, "highlight");
+    }
+
+    #[test]
+    fn test_unique_destination_no_collision_returns_same_path() {
+        let dir = tempdir().expect("tempdir");
+        let p = dir.path().join("free.mp4");
+        assert_eq!(unique_destination(&p), p);
+    }
+
+    #[test]
+    fn test_unique_destination_appends_counter() {
+        let dir = tempdir().expect("tempdir");
+        let p = dir.path().join("clip.mp4");
+        std::fs::File::create(&p).unwrap();
+        assert_eq!(unique_destination(&p), dir.path().join("clip (2).mp4"));
+
+        std::fs::File::create(dir.path().join("clip (2).mp4")).unwrap();
+        assert_eq!(unique_destination(&p), dir.path().join("clip (3).mp4"));
+    }
+
+    #[test]
+    fn test_move_does_not_overwrite_existing() {
+        let dir = tempdir().expect("tempdir");
+        let file_path = dir.path().join("Replay 2026-04-15 12-30-00.mp4");
+        std::fs::File::create(&file_path).unwrap();
+
+        // A previous clip already sorted to the tagged name.
+        let taken = dir.path().join("Replay 2026-04-15 12-30-00 !!.mp4");
+        std::fs::write(&taken, b"precious").unwrap();
+
+        let mut config = AppConfig::default();
+        config.disable_file_movesorting = true;
+        config.g1_bind_folder_name = "!! or ! (G1)".to_string();
+
+        let result = move_or_rename_file(&file_path, 1, &config).expect("move failed");
+
+        assert_eq!(
+            result.new_path,
+            dir.path().join("Replay 2026-04-15 12-30-00 !! (2).mp4")
+        );
+        // Original tagged file untouched.
+        assert_eq!(std::fs::read(&taken).unwrap(), b"precious");
+    }
+
+    #[test]
+    fn test_restore_file_roundtrip() {
+        let dir = tempdir().expect("tempdir");
+        let original = dir.path().join("clip.mp4");
+        let moved = dir.path().join("clip !!.mp4");
+        std::fs::File::create(&moved).unwrap();
+
+        let restored = restore_file(&moved, &original).expect("restore failed");
+        assert_eq!(restored, original);
+        assert!(original.exists());
+        assert!(!moved.exists());
     }
 
     #[test]

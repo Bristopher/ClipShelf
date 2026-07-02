@@ -29,6 +29,11 @@ pub struct AppStateInner {
     /// watcher is alive.
     pub last_file_created_at: Option<SystemTime>,
 
+    /// Raw path of that most recent created file (pre-move). Used to dedup
+    /// the same clip being reported by both the OBS WebSocket and the folder
+    /// watcher — unlike `current_file.path` this never changes on move.
+    pub last_created_path: Option<PathBuf>,
+
     /// Calibration mode: when active, each `save_clip_bind` press records
     /// the next `FileCreated` arrival time and emits a sample to the UI so
     /// the user can pick a sensible `save_clip_health_check_timeout_secs`.
@@ -61,6 +66,7 @@ impl AppStateInner {
             watcher_restart_count: 0,
             timer_running: false,
             last_file_created_at: None,
+            last_created_path: None,
             calibration: CalibrationState::default(),
         }
     }
@@ -74,5 +80,6 @@ pub struct ChannelState {
     pub user_timer_tx: mpsc::Sender<TimerCommand>,
     pub watcher_tx: mpsc::Sender<WatcherCommand>,
     pub count_up_tx: mpsc::Sender<CountUpCommand>,
+    pub obs_cmd_tx: mpsc::Sender<crate::obs_ws::ObsWsCommand>,
     pub hotkey_controller: crate::hotkeys::HotkeyController,
 }

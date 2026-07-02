@@ -1,6 +1,8 @@
 import { Settings } from "lucide-react";
+import { emit } from "@tauri-apps/api/event";
 import { Button } from "@/components/ui/button";
 import { openSettingsWindow, pressGkey } from "@/lib/commands";
+import { EVENTS } from "@/lib/events";
 
 const gkeys = [
   { key: 1, label: "G1", tag: "!!", accent: "var(--t-g1-accent)" },
@@ -15,7 +17,13 @@ export function Sidebar() {
       {gkeys.map((g) => (
         <button
           key={g.key}
-          onClick={() => pressGkey(g.key)}
+          // G4 opens the rename dialog (press_gkey rejects key 4 — it's not
+          // a move bind). The dialog listens for hotkey-triggered key=4.
+          onClick={() =>
+            g.key === 4
+              ? emit(EVENTS.HOTKEY_TRIGGERED, { key: 4 }).catch(console.error)
+              : pressGkey(g.key)
+          }
           style={{ backgroundColor: g.accent }}
           className="rounded px-1.5 py-1.5 text-white text-[10px] font-bold flex flex-col items-center gap-0 transition-[filter,transform] hover:brightness-110 active:scale-95"
         >
