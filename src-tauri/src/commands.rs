@@ -67,6 +67,20 @@ pub fn update_config(
         .hotkey_controller
         .reload(crate::hotkeys::bindings_from_config(&config));
 
+    // Keep the OS autostart registration in sync with the toggle.
+    {
+        use tauri_plugin_autostart::ManagerExt;
+        let autolaunch = app.autolaunch();
+        let result = if config.autostart_enabled {
+            autolaunch.enable()
+        } else {
+            autolaunch.disable()
+        };
+        if let Err(e) = result {
+            log::debug!("autostart sync: {}", e);
+        }
+    }
+
     // Hot-apply OBS WebSocket settings — the actor connects/disconnects/
     // reconnects with new credentials without an app restart.
     let new_obs = (
@@ -155,15 +169,22 @@ pub fn do_press_gkey(app: &AppHandle, state: &AppState, key: u8) {
                 moved_path: None,
                 renamed: false,
             });
+            s.push_undo(crate::state::UndoEntry {
+                from: result.original_path.clone(),
+                to: result.new_path.clone(),
+            });
             let mode = if config.disable_file_movesorting {
                 "renamed"
             } else {
                 "moved"
             };
             let msg = format!("File {} to {}", mode, result.tag_applied);
-            let entry = s
-                .logger
-                .log(LogLevel::Success, msg, LogCategory::FileMoved);
+            let entry = s.logger.log_with_path(
+                LogLevel::Success,
+                msg,
+                LogCategory::FileMoved,
+                Some(result.new_path.to_string_lossy().to_string()),
+            );
             let _ = app.emit("log-entry", &entry);
             let _ = app.emit(
                 "file-moved",
@@ -234,16 +255,21 @@ pub fn rename_file(text: String, state: State<'_, AppState>, app: AppHandle) -> 
                 moved_path: Some(result.new_path.clone()),
                 renamed: true,
             });
+            s.push_undo(crate::state::UndoEntry {
+                from: result.original_path.clone(),
+                to: result.new_path.clone(),
+            });
             let new_name = result
                 .new_path
                 .file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or("unknown")
                 .to_string();
-            let entry = s.logger.log(
+            let entry = s.logger.log_with_path(
                 LogLevel::Success,
                 format!("File renamed to: {}", new_name),
                 LogCategory::FileRenamed,
+                Some(result.new_path.to_string_lossy().to_string()),
             );
             let _ = app.emit("log-entry", &entry);
             let _ = app.emit(
@@ -273,6 +299,150 @@ pub fn rename_file(text: String, state: State<'_, AppState>, app: AppHandle) -> 
         }
     }
     Ok(())
+}
+
+#[tauri::command]
+pub fn undo_last_action(state: State<'_, AppState>, app: AppHandle) -> Result<(), String> {
+    do_undo(&app, state.inner());
+    Ok(())
+}
+
+/// Reverse the most recent move/rename. Free function so the global undo
+/// hotkey can call it directly in Rust, same as do_press_gkey.
+pub fn do_undo(app: &AppHandle, state: &AppState) {
+    let popped = {
+        let Ok(mut s) = state.lock() else { return };
+        s.undo_stack.pop()
+    };
+    let Some(entry) = popped else {
+        let Ok(mut s) = state.lock() else { return };
+        let log = s.logger.log(
+            LogLevel::Info,
+            "Nothing to undo".to_string(),
+            LogCategory::System,
+        );
+        let _ = app.emit("log-entry", &log);
+        return;
+    };
+
+    match mover::restore_file(&entry.to, &entry.from) {
+        Ok(restored) => {
+            let Ok(mut s) = state.lock() else { return };
+            s.current_file = Some(CurrentFile {
+                path: restored.clone(),
+                moved_path: None,
+                renamed: false,
+            });
+            let undone_name = entry
+                .to
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("?")
+                .to_string();
+            let restored_name = restored
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("?")
+                .to_string();
+            let log = s.logger.log_with_path(
+                LogLevel::Success,
+                format!("Undo: {} → {}", undone_name, restored_name),
+                LogCategory::FileMoved,
+                Some(restored.to_string_lossy().to_string()),
+            );
+            let _ = app.emit("log-entry", &log);
+            if s.config.log_file_enabled {
+                s.logger
+                    .write_to_file(&format!("Undo: {} ---------> {}", undone_name, restored_name));
+            }
+        }
+        Err(e) => {
+            let Ok(mut s) = state.lock() else { return };
+            let log = s.logger.log(
+                LogLevel::Error,
+                format!("Undo failed: {}", e),
+                LogCategory::System,
+            );
+            let _ = app.emit("log-entry", &log);
+        }
+    }
+}
+
+/// Open Windows Explorer with the given file selected/highlighted.
+#[tauri::command]
+pub fn reveal_in_explorer(path: String) -> Result<(), String> {
+    let p = std::path::Path::new(&path);
+    if !p.exists() {
+        return Err("File no longer exists at this location".to_string());
+    }
+    opener::reveal(p).map_err(|e| e.to_string())
+}
+
+/// Pause/resume clip watching. Paused = watcher stopped AND file events
+/// from any source (OBS WebSocket, health-check rescan) ignored, so the
+/// user can reorganize the clips folder without the app grabbing files.
+#[tauri::command]
+pub fn set_watch_paused(
+    paused: bool,
+    state: State<'_, AppState>,
+    channels: State<'_, ChannelState>,
+    app: AppHandle,
+) -> Result<(), String> {
+    let videos_folder = {
+        let mut s = state.lock().map_err(|e| e.to_string())?;
+        s.watch_paused = paused;
+        let msg = if paused {
+            "Watching paused — new clips are ignored"
+        } else {
+            "Watching resumed"
+        };
+        let entry = s.logger.log(
+            if paused { LogLevel::Warning } else { LogLevel::Info },
+            msg.to_string(),
+            LogCategory::WatcherStatus,
+        );
+        let _ = app.emit("log-entry", &entry);
+        s.config.videos_folder.clone()
+    };
+
+    // Keep the tray checkbox in sync when toggled from the UI.
+    if let Some(tray) = app.try_state::<crate::tray::TrayItems>() {
+        let _ = tray.pause_item.set_checked(paused);
+    }
+
+    let watcher_tx = channels.watcher_tx.clone();
+    let cmd = if paused {
+        WatcherCommand::Stop
+    } else if !videos_folder.is_empty() {
+        WatcherCommand::Start {
+            path: std::path::PathBuf::from(videos_folder),
+        }
+    } else {
+        // Resumed but no folder configured — nothing to start, but the UI
+        // still needs to leave the "paused" state.
+        let _ = app.emit(
+            "watcher-status",
+            WatcherStatusPayload {
+                status: "stopped".to_string(),
+                restart_count: None,
+                message: None,
+            },
+        );
+        return Ok(());
+    };
+    tauri::async_runtime::spawn(async move {
+        let _ = watcher_tx.send(cmd).await;
+    });
+    Ok(())
+}
+
+/// Number of connected monitors — used by the Settings default-position picker.
+#[tauri::command]
+pub fn get_monitor_count(app: AppHandle) -> usize {
+    app.get_webview_window("main")
+        .and_then(|w| w.available_monitors().ok())
+        .map(|m| m.len())
+        .unwrap_or(1)
 }
 
 #[tauri::command]
@@ -546,31 +716,18 @@ pub fn open_first_run_window(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn reset_window(window: tauri::Window) -> Result<(), String> {
-    // Default size matches tauri.conf.json window config.
-    const DEFAULT_W: u32 = 900;
-    const DEFAULT_H: u32 = 260;
-
-    let monitors = window.available_monitors().map_err(|e| e.to_string())?;
-    let target = if monitors.len() > 1 {
-        &monitors[1]
-    } else {
-        monitors.first().ok_or("no monitors available")?
+pub fn reset_window(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    // Back to the configured default open position (Settings > Window) at
+    // the default size, and forget the remembered layout.
+    let (config, config_path) = {
+        let s = state.lock().map_err(|e| e.to_string())?;
+        (s.config.clone(), s.config_path.clone())
     };
-    let pos = target.position();
-
-    window
-        .set_position(tauri::Position::Physical(tauri::PhysicalPosition {
-            x: pos.x,
-            y: pos.y,
-        }))
-        .map_err(|e| e.to_string())?;
-    window
-        .set_size(tauri::Size::Physical(tauri::PhysicalSize {
-            width: DEFAULT_W,
-            height: DEFAULT_H,
-        }))
-        .map_err(|e| e.to_string())?;
+    let window = app
+        .get_webview_window("main")
+        .ok_or("main window not found")?;
+    crate::window_layout::clear(&crate::window_layout::layout_path(&config_path));
+    crate::window_layout::apply_default_position(&window, &config, true);
     Ok(())
 }
 

@@ -11,6 +11,7 @@ mod theme;
 mod timer;
 mod tray;
 mod watcher;
+mod window_layout;
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -44,6 +45,10 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .setup(|app| {
             let app_handle = app.handle().clone();
 
@@ -188,6 +193,17 @@ pub fn run() {
                                 restart_count,
                                 message,
                             } => {
+                                // While the user has watching paused, the
+                                // watcher's own "stopped" reads as "paused"
+                                // in the UI.
+                                let status = {
+                                    let s = state.lock().unwrap();
+                                    if s.watch_paused && status == "stopped" {
+                                        "paused".to_string()
+                                    } else {
+                                        status
+                                    }
+                                };
                                 {
                                     let mut s = state.lock().unwrap();
                                     s.watcher_restart_count = restart_count;
@@ -283,6 +299,13 @@ pub fn run() {
                             }
                             HotkeyAction::CountUpToggle => {
                                 let _ = count_up_tx.send(CountUpCommand::Toggle).await;
+                            }
+                            HotkeyAction::Undo => {
+                                let app = app_handle.clone();
+                                let st = state.clone();
+                                tauri::async_runtime::spawn_blocking(move || {
+                                    commands::do_undo(&app, &st);
+                                });
                             }
                             HotkeyAction::SaveClipHealthCheck => {
                                 let calibrating = {
@@ -413,15 +436,25 @@ pub fn run() {
                 });
             }
 
-            // Position window on second monitor if available
+            // Restore the remembered window layout, or fall back to the
+            // configured default open position (monitor + anchor corner).
             if let Some(window) = app_handle.get_webview_window("main") {
-                let monitors = window.available_monitors().unwrap_or_default();
-                if monitors.len() > 1 {
-                    let second = &monitors[1];
-                    let pos = second.position();
-                    let _ = window.set_position(tauri::Position::Physical(
-                        tauri::PhysicalPosition { x: pos.x, y: pos.y },
-                    ));
+                window_layout::apply_startup_layout(&window, &config, &config_path);
+            }
+
+            // Sync the OS autostart registration with the config toggle.
+            {
+                use tauri_plugin_autostart::ManagerExt;
+                let autolaunch = app_handle.autolaunch();
+                let result = if config.autostart_enabled {
+                    autolaunch.enable()
+                } else {
+                    autolaunch.disable()
+                };
+                if let Err(e) = result {
+                    // Disabling an entry that was never registered errors on
+                    // some platforms — harmless, log at debug only.
+                    log::debug!("autostart sync: {}", e);
                 }
             }
 
@@ -518,12 +551,25 @@ pub fn run() {
             commands::cancel_calibration,
             commands::toggle_count_up,
             commands::full_quit,
+            commands::undo_last_action,
+            commands::reveal_in_explorer,
+            commands::set_watch_paused,
+            commands::get_monitor_count,
         ])
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                // Hide window instead of closing (minimize to tray)
-                let _ = window.hide();
-                api.prevent_close();
+            match event {
+                tauri::WindowEvent::CloseRequested { api, .. } => {
+                    // Hide window instead of closing (minimize to tray)
+                    let _ = window.hide();
+                    api.prevent_close();
+                }
+                // Remember the main window's layout (debounced).
+                tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) => {
+                    if window.label() == "main" {
+                        window_layout::schedule_layout_save(window);
+                    }
+                }
+                _ => {}
             }
         })
         .run(tauri::generate_context!())
@@ -540,9 +586,13 @@ async fn handle_file_created(
 ) {
     // Dedup: the same clip can be reported twice — OBS WebSocket + folder
     // watcher (or the health-check rescan). First signal wins; anything
-    // re-reporting the same raw path within 10s is dropped.
+    // re-reporting the same raw path within 10s is dropped. Also the single
+    // choke point for pause: no source may inject files while paused.
     {
         let s = state.lock().unwrap();
+        if s.watch_paused {
+            return;
+        }
         if let (Some(prev), Some(at)) = (&s.last_created_path, s.last_file_created_at) {
             if *prev == path
                 && at.elapsed().unwrap_or_default() < std::time::Duration::from_secs(10)
@@ -659,7 +709,12 @@ async fn handle_file_created(
         } else {
             format!("New file: {} ({:.1}MB)", filename, size_mb)
         };
-        let entry = s.logger.log(level, msg, LogCategory::FileCreated);
+        let entry = s.logger.log_with_path(
+            level,
+            msg,
+            LogCategory::FileCreated,
+            Some(path.to_string_lossy().to_string()),
+        );
         let _ = app.emit("log-entry", &entry);
 
         // Log to file

@@ -25,3 +25,9 @@ export const startCalibration = (targetSamples: number) =>
 export const cancelCalibration = () => invoke<void>("cancel_calibration");
 export const toggleCountUp = () => invoke<void>("toggle_count_up");
 export const fullQuit = () => invoke<void>("full_quit");
+export const undoLastAction = () => invoke<void>("undo_last_action");
+export const revealInExplorer = (path: string) =>
+  invoke<void>("reveal_in_explorer", { path });
+export const setWatchPaused = (paused: boolean) =>
+  invoke<void>("set_watch_paused", { paused });
+export const getMonitorCount = () => invoke<number>("get_monitor_count");

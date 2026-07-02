@@ -15,6 +15,18 @@ pub struct CurrentFile {
     pub renamed: bool,
 }
 
+/// One reversible move/rename: `from` is where the file was, `to` is where
+/// it ended up. Undo renames `to` back to `from`.
+#[derive(Debug, Clone)]
+pub struct UndoEntry {
+    pub from: PathBuf,
+    pub to: PathBuf,
+}
+
+/// Cap on the undo history — enough for a whole session of mis-presses
+/// without growing unbounded.
+pub const UNDO_STACK_MAX: usize = 20;
+
 pub struct AppStateInner {
     pub current_file: Option<CurrentFile>,
     pub bind_chosen: Option<String>,
@@ -38,6 +50,14 @@ pub struct AppStateInner {
     /// the next `FileCreated` arrival time and emits a sample to the UI so
     /// the user can pick a sensible `save_clip_health_check_timeout_secs`.
     pub calibration: CalibrationState,
+
+    /// History of moves/renames for undo, newest last.
+    pub undo_stack: Vec<UndoEntry>,
+
+    /// While true the folder watcher is stopped and file events (including
+    /// OBS WebSocket injection) are ignored — for reorganizing the clips
+    /// folder without the app grabbing files. Runtime-only, resets on launch.
+    pub watch_paused: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -68,7 +88,17 @@ impl AppStateInner {
             last_file_created_at: None,
             last_created_path: None,
             calibration: CalibrationState::default(),
+            undo_stack: Vec::new(),
+            watch_paused: false,
         }
+    }
+
+    /// Push an undo entry, evicting the oldest past the cap.
+    pub fn push_undo(&mut self, entry: UndoEntry) {
+        if self.undo_stack.len() >= UNDO_STACK_MAX {
+            self.undo_stack.remove(0);
+        }
+        self.undo_stack.push(entry);
     }
 }
 

@@ -1,16 +1,35 @@
 use tauri::{
-    AppHandle, Manager,
-    menu::{Menu, MenuItem},
+    AppHandle, Manager, Wry,
+    menu::{CheckMenuItem, Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
 
+/// Tray menu items that other code needs to poke (managed in app state).
+pub struct TrayItems {
+    pub pause_item: CheckMenuItem<Wry>,
+}
+
 pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+    let pause_item = CheckMenuItem::with_id(
+        app,
+        "pause_watching",
+        "Pause Watching",
+        true,
+        false,
+        None::<&str>,
+    )?;
     let videos_item = MenuItem::with_id(app, "videos_folder", "Video Folder", true, None::<&str>)?;
     let log_item = MenuItem::with_id(app, "log_folder", "Log Folder", true, None::<&str>)?;
     let help_item = MenuItem::with_id(app, "help", "Help", true, None::<&str>)?;
     let quit_item = MenuItem::with_id(app, "quit", "Exit", true, None::<&str>)?;
 
-    let menu = Menu::with_items(app, &[&videos_item, &log_item, &help_item, &quit_item])?;
+    let menu = Menu::with_items(
+        app,
+        &[&pause_item, &videos_item, &log_item, &help_item, &quit_item],
+    )?;
+    app.manage(TrayItems {
+        pause_item: pause_item.clone(),
+    });
 
     let icon = app
         .default_window_icon()
@@ -23,6 +42,22 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         .menu(&menu)
         .on_menu_event(|app, event| {
             match event.id().as_ref() {
+                "pause_watching" => {
+                    // CheckMenuItem toggles itself; read the new state and
+                    // route through the same logic as the UI toggle.
+                    let paused = app
+                        .try_state::<TrayItems>()
+                        .map(|t| t.pause_item.is_checked().unwrap_or(false))
+                        .unwrap_or(false);
+                    let state = app.state::<crate::state::AppState>();
+                    let channels = app.state::<crate::state::ChannelState>();
+                    let _ = crate::commands::set_watch_paused(
+                        paused,
+                        state,
+                        channels,
+                        app.clone(),
+                    );
+                }
                 "videos_folder" => {
                     if let Ok(config) = crate::config::AppConfig::load() {
                         let _ = opener::open(&config.videos_folder);

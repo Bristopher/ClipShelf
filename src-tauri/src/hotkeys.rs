@@ -45,6 +45,8 @@ pub enum HotkeyAction {
     SaveClipHealthCheck,
     /// Toggle the count-up stopwatch — running ↔ reset-stopped-at-zero.
     CountUpToggle,
+    /// Undo the last move/rename.
+    Undo,
 }
 
 #[derive(Debug, Clone)]
@@ -173,6 +175,9 @@ pub fn bindings_from_config(config: &crate::config::AppConfig) -> Vec<(HotkeyAct
     }
     if !config.count_up_bind.is_empty() {
         bindings.push((HotkeyAction::CountUpToggle, config.count_up_bind.clone()));
+    }
+    if !config.undo_bind.is_empty() {
+        bindings.push((HotkeyAction::Undo, config.undo_bind.clone()));
     }
     bindings.into_iter().filter(|(_, s)| !s.is_empty()).collect()
 }

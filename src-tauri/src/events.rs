@@ -28,6 +28,10 @@ pub struct LogEntryPayload {
     pub level: LogLevel,
     pub message: String,
     pub category: LogCategory,
+    /// File this entry refers to (created/moved/renamed clips). Present so
+    /// the UI can offer click-to-reveal / ctrl+click-to-play on the entry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

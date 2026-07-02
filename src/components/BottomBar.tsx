@@ -2,9 +2,16 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { Timer as TimerIcon } from "lucide-react";
-import { wipeLog, restoreLog, toggleCountUp } from "@/lib/commands";
+import { Pause, Play, Timer as TimerIcon, Undo2 } from "lucide-react";
+import {
+  wipeLog,
+  restoreLog,
+  toggleCountUp,
+  undoLastAction,
+  setWatchPaused,
+} from "@/lib/commands";
 import { useCountUp } from "@/hooks/useCountUp";
+import { useWatcherStatus } from "@/hooks/useWatcherStatus";
 import type { LogEntry } from "@/types";
 
 interface BottomBarProps {
@@ -29,6 +36,8 @@ export function BottomBar({
   onRestore,
 }: BottomBarProps) {
   const countUp = useCountUp();
+  const watcher = useWatcherStatus();
+  const paused = watcher.status === "paused";
 
   const handleWipe = async () => {
     await wipeLog();
@@ -53,6 +62,33 @@ export function BottomBar({
       </Button>
       <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={handleRestore}>
         Restore
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-7 text-xs gap-1"
+        onClick={() => undoLastAction().catch(console.error)}
+        title="Undo last move/rename"
+      >
+        <Undo2 className="h-3 w-3" />
+        Undo
+      </Button>
+
+      <Separator orientation="vertical" className="h-4" />
+
+      <Button
+        variant="ghost"
+        size="sm"
+        className={`h-7 text-xs gap-1 ${paused ? "text-amber-400 hover:text-amber-300" : ""}`}
+        onClick={() => setWatchPaused(!paused).catch(console.error)}
+        title={
+          paused
+            ? "Watching paused — new clips are ignored. Click to resume."
+            : "Pause watching (reorganize your clips folder without the app grabbing files)"
+        }
+      >
+        {paused ? <Play className="h-3 w-3" /> : <Pause className="h-3 w-3" />}
+        {paused ? "Paused" : "Watching"}
       </Button>
 
       <Separator orientation="vertical" className="h-4" />

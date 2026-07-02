@@ -59,12 +59,25 @@ impl AppLogger {
         message: String,
         category: LogCategory,
     ) -> LogEntryPayload {
+        self.log_with_path(level, message, category, None)
+    }
+
+    /// Like `log`, but attaches the file path the entry refers to so the UI
+    /// can make it clickable (reveal in Explorer / play).
+    pub fn log_with_path(
+        &mut self,
+        level: LogLevel,
+        message: String,
+        category: LogCategory,
+        path: Option<String>,
+    ) -> LogEntryPayload {
         let timestamp = Local::now().format("%I:%M:%S %p").to_string();
         let entry = LogEntryPayload {
             timestamp,
             level,
             message,
             category,
+            path,
         };
         self.history.push(entry.clone());
         self.display_buffer.push(entry.clone());

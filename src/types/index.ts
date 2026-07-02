@@ -84,6 +84,16 @@ export interface AppConfig {
   count_up_bind: string;
   /** Clips smaller than this (MB) get the "possible black screen" warning. */
   small_file_warn_mb: number;
+  /** Hotkey to undo the last move/rename. Empty = not registered. */
+  undo_bind: string;
+  /** Launch GKey Mover automatically at Windows login. */
+  autostart_enabled: boolean;
+  /** Restore last window position/size on launch. */
+  remember_window_layout: boolean;
+  /** 1-based monitor for the default open position. */
+  default_monitor: number;
+  /** Anchor corner for the default open position. */
+  default_anchor: string;
 }
 
 export interface CountUpTick {
@@ -107,6 +117,8 @@ export interface LogEntry {
   level: "info" | "warning" | "error" | "success";
   message: string;
   category: string;
+  /** File this entry refers to — makes the entry clickable (reveal/play). */
+  path?: string;
 }
 
 export interface TimerTick {

@@ -37,6 +37,11 @@ fn default_save_clip_health_check_timeout_secs() -> u32 { 5 }
 fn default_timer_flash_theme_id() -> Option<String> { None }
 fn default_count_up_bind() -> String { "".to_string() }
 fn default_small_file_warn_mb() -> f64 { 6.5 }
+fn default_undo_bind() -> String { "".to_string() }
+fn default_autostart_enabled() -> bool { false }
+fn default_remember_window_layout() -> bool { true }
+fn default_monitor() -> u32 { 2 }
+fn default_anchor() -> String { "top-left".to_string() }
 
 // --- AppConfig struct ---
 
@@ -157,6 +162,32 @@ pub struct AppConfig {
     /// tunable rather than the old hardcoded 6.5.
     #[serde(default = "default_small_file_warn_mb")]
     pub small_file_warn_mb: f64,
+
+    /// Hotkey to undo the last move/rename. Empty = not registered. Users
+    /// should pick something rare — plain Ctrl+Z is registered GLOBALLY and
+    /// would swallow undo in every other app.
+    #[serde(default = "default_undo_bind")]
+    pub undo_bind: String,
+
+    /// Launch GKey Mover automatically at Windows login.
+    #[serde(default = "default_autostart_enabled")]
+    pub autostart_enabled: bool,
+
+    /// Restore the last window position/size on launch. The layout itself is
+    /// persisted separately in window_layout.toml so the Settings draft/save
+    /// model can't clobber a fresher auto-saved layout.
+    #[serde(default = "default_remember_window_layout")]
+    pub remember_window_layout: bool,
+
+    /// 1-based monitor for the default open position (clamped to the number
+    /// of connected monitors at runtime).
+    #[serde(default = "default_monitor")]
+    pub default_monitor: u32,
+
+    /// Corner anchor for the default open position: "top-left", "top-right",
+    /// "bottom-left", "bottom-right", or "center".
+    #[serde(default = "default_anchor")]
+    pub default_anchor: String,
 }
 
 impl Default for AppConfig {
@@ -194,6 +225,11 @@ impl Default for AppConfig {
             timer_flash_theme_id: default_timer_flash_theme_id(),
             count_up_bind: default_count_up_bind(),
             small_file_warn_mb: default_small_file_warn_mb(),
+            undo_bind: default_undo_bind(),
+            autostart_enabled: default_autostart_enabled(),
+            remember_window_layout: default_remember_window_layout(),
+            default_monitor: default_monitor(),
+            default_anchor: default_anchor(),
         }
     }
 }

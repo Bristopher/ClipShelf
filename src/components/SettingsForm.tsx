@@ -4,9 +4,10 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
-import { Folder } from "lucide-react";
+import { Folder, RotateCcw } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getVersion } from "@tauri-apps/api/app";
+import { getMonitorCount, resetWindow } from "@/lib/commands";
 import { ThemePanel } from "@/components/ThemePanel";
 import { KeybindInput } from "@/components/KeybindInput";
 import { SaveClipCalibration } from "@/components/SaveClipCalibration";
@@ -20,9 +21,11 @@ interface SettingsFormProps {
 
 export function SettingsForm({ config, onConfigChange }: SettingsFormProps) {
   const [version, setVersion] = useState<string>("");
+  const [monitorCount, setMonitorCount] = useState(1);
 
   useEffect(() => {
     getVersion().then(setVersion).catch(console.error);
+    getMonitorCount().then(setMonitorCount).catch(console.error);
   }, []);
 
   // Updates the in-memory draft only — persistence happens when the user
@@ -87,6 +90,77 @@ export function SettingsForm({ config, onConfigChange }: SettingsFormProps) {
             onCheckedChange={(v) => update({ hover_full_opacity: v })}
           />
         </div>
+        <div className="flex items-center justify-between">
+          <div className="pr-2">
+            <Label className="text-xs">Start with Windows</Label>
+            <p className="text-[10px] text-t-muted">
+              Launch GKey Mover automatically when you log in.
+            </p>
+          </div>
+          <Switch
+            checked={config.autostart_enabled}
+            onCheckedChange={(v) => update({ autostart_enabled: v })}
+          />
+        </div>
+      </section>
+
+      <Separator />
+
+      <section className="space-y-3">
+        <h3 className="text-sm font-semibold">Window</h3>
+        <div className="flex items-center justify-between">
+          <div className="pr-2">
+            <Label className="text-xs">Remember position &amp; size</Label>
+            <p className="text-[10px] text-t-muted">
+              Reopen where you left the window. Off = always open at the
+              default position below.
+            </p>
+          </div>
+          <Switch
+            checked={config.remember_window_layout}
+            onCheckedChange={(v) => update({ remember_window_layout: v })}
+          />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Default open position</Label>
+          <div className="flex gap-2">
+            <select
+              value={Math.min(config.default_monitor, monitorCount)}
+              onChange={(e) => update({ default_monitor: Number(e.target.value) })}
+              className="flex-1 text-xs h-8 px-2 rounded bg-panel border border-t-border"
+            >
+              {Array.from({ length: monitorCount }, (_, i) => i + 1).map((n) => (
+                <option key={n} value={n}>
+                  Monitor {n}
+                </option>
+              ))}
+            </select>
+            <select
+              value={config.default_anchor}
+              onChange={(e) => update({ default_anchor: e.target.value })}
+              className="flex-1 text-xs h-8 px-2 rounded bg-panel border border-t-border"
+            >
+              <option value="top-left">Top left</option>
+              <option value="top-right">Top right</option>
+              <option value="bottom-left">Bottom left</option>
+              <option value="bottom-right">Bottom right</option>
+              <option value="center">Center</option>
+            </select>
+          </div>
+          <p className="text-[10px] text-t-muted">
+            Used on launch when nothing is remembered, and by the Reset
+            button.
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8 text-xs gap-1.5"
+          onClick={() => resetWindow().catch(console.error)}
+        >
+          <RotateCcw className="h-3 w-3" />
+          Reset window to default position
+        </Button>
       </section>
 
       <Separator />
@@ -159,6 +233,19 @@ export function SettingsForm({ config, onConfigChange }: SettingsFormProps) {
           <p className="text-[10px] text-t-muted">
             Press once to start counting up from 0. Press again to reset and
             stop. Press again to start over.
+          </p>
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Undo last move/rename</Label>
+          <KeybindInput
+            value={config.undo_bind}
+            onChange={(v) => update({ undo_bind: v })}
+          />
+          <p className="text-[10px] text-t-muted">
+            Puts the last clip back where it was (works for mis-pressed
+            G-keys and renames). This is a GLOBAL hotkey — avoid Ctrl+Z or it
+            will swallow undo in every other app. Try something like
+            Ctrl+Alt+Z or a spare G-key.
           </p>
         </div>
       </section>
