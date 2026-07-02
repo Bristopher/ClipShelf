@@ -220,6 +220,28 @@ export function SettingsForm({ config, onConfigChange }: SettingsFormProps) {
             />
           </div>
         ))}
+        <div className="space-y-1">
+          <Label className="text-xs">
+            Black-screen warning threshold ({config.small_file_warn_mb} MB)
+          </Label>
+          <Input
+            type="number"
+            min={0}
+            max={500}
+            step={0.5}
+            value={config.small_file_warn_mb}
+            className="text-xs h-8"
+            onChange={(e) =>
+              update({
+                small_file_warn_mb: Math.max(0, Number(e.target.value) || 0),
+              })
+            }
+          />
+          <p className="text-[10px] text-t-muted">
+            Clips smaller than this are flagged as possible black screens and
+            play the error sound. Depends on your bitrate and replay length.
+          </p>
+        </div>
       </section>
 
       <Separator />

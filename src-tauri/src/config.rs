@@ -21,15 +21,12 @@ fn default_clip_save_sound_custom() -> Option<String> { None }
 fn default_move_sound_enabled() -> bool { false }
 fn default_error_sound_enabled() -> bool { true }
 fn default_error_sound_custom() -> Option<String> { None }
-fn default_windows_notification_enabled() -> bool { false }
 fn default_timer_enabled() -> bool { true }
 fn default_timer_duration_ms() -> u64 { 70000 }
 fn default_auto_wipe_enabled() -> bool { true }
 fn default_disable_file_movesorting() -> bool { true }
 fn default_obs_websocket_enabled() -> bool { false }
 fn default_obs_websocket_password() -> String { "".to_string() }
-fn default_shadowplay_folder() -> Option<String> { None }
-fn default_prompt_capture_software() -> bool { false }
 fn default_window_opacity() -> f64 { 1.0 }
 fn default_hover_full_opacity() -> bool { true }
 fn default_active_theme_id() -> String { "dark".to_string() }
@@ -39,6 +36,7 @@ fn default_timer_flash_enabled() -> bool { true }
 fn default_save_clip_health_check_timeout_secs() -> u32 { 5 }
 fn default_timer_flash_theme_id() -> Option<String> { None }
 fn default_count_up_bind() -> String { "".to_string() }
+fn default_small_file_warn_mb() -> f64 { 6.5 }
 
 // --- AppConfig struct ---
 
@@ -92,9 +90,6 @@ pub struct AppConfig {
     #[serde(default = "default_error_sound_custom")]
     pub error_sound_custom: Option<String>,
 
-    #[serde(default = "default_windows_notification_enabled")]
-    pub windows_notification_enabled: bool,
-
     #[serde(default = "default_timer_enabled")]
     pub timer_enabled: bool,
 
@@ -112,12 +107,6 @@ pub struct AppConfig {
 
     #[serde(default = "default_obs_websocket_password")]
     pub obs_websocket_password: String,
-
-    #[serde(default = "default_shadowplay_folder")]
-    pub shadowplay_folder: Option<String>,
-
-    #[serde(default = "default_prompt_capture_software")]
-    pub prompt_capture_software: bool,
 
     #[serde(default = "default_window_opacity")]
     pub window_opacity: f64,
@@ -162,6 +151,12 @@ pub struct AppConfig {
     /// hotkey registered.
     #[serde(default = "default_count_up_bind")]
     pub count_up_bind: String,
+
+    /// Clips smaller than this (MB) get a "possible black screen" warning +
+    /// error sound. Depends on bitrate and replay-buffer length, so it's
+    /// tunable rather than the old hardcoded 6.5.
+    #[serde(default = "default_small_file_warn_mb")]
+    pub small_file_warn_mb: f64,
 }
 
 impl Default for AppConfig {
@@ -183,15 +178,12 @@ impl Default for AppConfig {
             move_sound_enabled: default_move_sound_enabled(),
             error_sound_enabled: default_error_sound_enabled(),
             error_sound_custom: default_error_sound_custom(),
-            windows_notification_enabled: default_windows_notification_enabled(),
             timer_enabled: default_timer_enabled(),
             timer_duration_ms: default_timer_duration_ms(),
             auto_wipe_enabled: default_auto_wipe_enabled(),
             disable_file_movesorting: default_disable_file_movesorting(),
             obs_websocket_enabled: default_obs_websocket_enabled(),
             obs_websocket_password: default_obs_websocket_password(),
-            shadowplay_folder: default_shadowplay_folder(),
-            prompt_capture_software: default_prompt_capture_software(),
             window_opacity: default_window_opacity(),
             hover_full_opacity: default_hover_full_opacity(),
             active_theme_id: default_active_theme_id(),
@@ -201,6 +193,7 @@ impl Default for AppConfig {
             save_clip_health_check_timeout_secs: default_save_clip_health_check_timeout_secs(),
             timer_flash_theme_id: default_timer_flash_theme_id(),
             count_up_bind: default_count_up_bind(),
+            small_file_warn_mb: default_small_file_warn_mb(),
         }
     }
 }
@@ -316,15 +309,13 @@ mod tests {
         assert!(!cfg.move_sound_enabled);
         assert!(cfg.error_sound_enabled);
         assert!(cfg.error_sound_custom.is_none());
-        assert!(!cfg.windows_notification_enabled);
         assert!(cfg.timer_enabled);
         assert_eq!(cfg.timer_duration_ms, 70000);
         assert!(cfg.auto_wipe_enabled);
         assert!(cfg.disable_file_movesorting);
         assert!(!cfg.obs_websocket_enabled);
         assert_eq!(cfg.obs_websocket_password, "");
-        assert!(cfg.shadowplay_folder.is_none());
-        assert!(!cfg.prompt_capture_software);
+        assert_eq!(cfg.small_file_warn_mb, 6.5);
     }
 
     #[test]
@@ -346,7 +337,6 @@ mod tests {
         original.videos_folder = "C:/Videos".to_string();
         original.timer_duration_ms = 30000;
         original.obs_websocket_password = "secret123".to_string();
-        original.shadowplay_folder = Some("C:/Shadowplay".to_string());
 
         original.save_to(path).expect("save_to failed");
 
@@ -355,7 +345,6 @@ mod tests {
         assert_eq!(loaded.videos_folder, "C:/Videos");
         assert_eq!(loaded.timer_duration_ms, 30000);
         assert_eq!(loaded.obs_websocket_password, "secret123");
-        assert_eq!(loaded.shadowplay_folder, Some("C:/Shadowplay".to_string()));
         // Untouched defaults should still be correct
         assert_eq!(loaded.g1_bind, "ctrl+F13");
         assert!(loaded.auto_wipe_enabled);

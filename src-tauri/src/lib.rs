@@ -44,7 +44,6 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let app_handle = app.handle().clone();
 
@@ -554,7 +553,7 @@ async fn handle_file_created(
     }
 
     let size_mb = mover::file_size_mb(&path);
-    let is_warning = size_mb < 6.5;
+    let is_warning = size_mb < config.small_file_warn_mb;
 
     let filename = path
         .file_name()
@@ -819,21 +818,22 @@ fn spawn_save_clip_health_check(
     });
 }
 
+static OBS_TIME_RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
+    Regex::new(r"\d{4}-\d{2}-\d{2} (\d{2})-(\d{2})-(\d{2})").unwrap()
+});
+static SP_TIME_RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
+    Regex::new(r"\d{4}\.\d{2}\.\d{2} - (\d{2})\.(\d{2})\.(\d{2})").unwrap()
+});
+
 /// Parse time from an OBS or ShadowPlay filename.
 /// OBS: "Replay 2026-04-15 12-30-00.mp4" -> "12:30:00"
 /// ShadowPlay: "Game 2026.04.15 - 12.30.00.mp4" -> "12:30:00"
 fn parse_time_from_filename(filename: &str) -> String {
-    // OBS format: YYYY-MM-DD HH-MM-SS
-    let obs_re = Regex::new(r"\d{4}-\d{2}-\d{2} (\d{2})-(\d{2})-(\d{2})").unwrap();
-    if let Some(caps) = obs_re.captures(filename) {
+    if let Some(caps) = OBS_TIME_RE.captures(filename) {
         return format!("{}:{}:{}", &caps[1], &caps[2], &caps[3]);
     }
-
-    // ShadowPlay format: YYYY.MM.DD - HH.MM.SS
-    let sp_re = Regex::new(r"\d{4}\.\d{2}\.\d{2} - (\d{2})\.(\d{2})\.(\d{2})").unwrap();
-    if let Some(caps) = sp_re.captures(filename) {
+    if let Some(caps) = SP_TIME_RE.captures(filename) {
         return format!("{}:{}:{}", &caps[1], &caps[2], &caps[3]);
     }
-
     String::new()
 }

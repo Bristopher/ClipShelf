@@ -1,5 +1,4 @@
-use tauri::window::Color;
-use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::config::AppConfig;
 use crate::events::*;

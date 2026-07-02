@@ -66,15 +66,12 @@ export interface AppConfig {
   move_sound_enabled: boolean;
   error_sound_enabled: boolean;
   error_sound_custom: string | null;
-  windows_notification_enabled: boolean;
   timer_enabled: boolean;
   timer_duration_ms: number;
   auto_wipe_enabled: boolean;
   disable_file_movesorting: boolean;
   obs_websocket_enabled: boolean;
   obs_websocket_password: string;
-  shadowplay_folder: string | null;
-  prompt_capture_software: boolean;
   window_opacity: number;
   hover_full_opacity: boolean;
   active_theme_id: string;
@@ -85,6 +82,8 @@ export interface AppConfig {
   /** null = auto-pick contrasting built-in theme; otherwise theme id to swap to during ≤5s flash. */
   timer_flash_theme_id: string | null;
   count_up_bind: string;
+  /** Clips smaller than this (MB) get the "possible black screen" warning. */
+  small_file_warn_mb: number;
 }
 
 export interface CountUpTick {

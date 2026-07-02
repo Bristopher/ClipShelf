@@ -65,10 +65,6 @@ pub fn file_size_mb(path: &Path) -> f64 {
     }
 }
 
-pub fn is_file_size_valid(path: &Path, min_size_mb: f64) -> bool {
-    file_size_mb(path) >= min_size_mb
-}
-
 // --- Destination helpers ---
 
 /// `std::fs::rename` on Windows silently REPLACES an existing destination —
@@ -271,10 +267,6 @@ mod tests {
         drop(f);
 
         let size_mb = file_size_mb(&file_path);
-        // 1 KB is not >= 6.5 MB
-        assert!(!is_file_size_valid(&file_path, 6.5));
-        // 1 KB is >= 0 MB
-        assert!(is_file_size_valid(&file_path, 0.0));
         // Size should be approximately 1/1024 MB
         assert!(size_mb > 0.0 && size_mb < 0.01);
     }
