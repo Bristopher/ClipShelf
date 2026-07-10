@@ -7,6 +7,7 @@ mod mover;
 mod obs_ws;
 mod sound;
 mod state;
+mod stats;
 mod theme;
 mod timer;
 mod tray;
@@ -609,10 +610,11 @@ pub fn run() {
             commands::get_monitor_count,
             commands::get_watcher_status,
             commands::get_obs_status,
-            commands::drop_file_to_gkey,
+            commands::drop_files_to_gkey,
             commands::select_dropped_file,
             commands::get_gkey_stats,
             commands::get_diagnostics,
+            commands::test_obs_connection,
         ])
         .on_window_event(|window, event| {
             match event {

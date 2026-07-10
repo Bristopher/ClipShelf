@@ -8,10 +8,10 @@ import {
   wipeLog,
   undoLastAction,
   openSettingsWindow,
-  dropFileToGkey,
+  dropFilesToGkey,
   selectDroppedFile,
 } from "@/lib/commands";
-import { errorMessage, toastError, toastInfo } from "@/lib/toast";
+import { errorMessage, toastError, toastInfo, toastSuccess } from "@/lib/toast";
 import { EVENTS } from "@/lib/events";
 import { useEventLog } from "@/hooks/useEventLog";
 import { useTimer } from "@/hooks/useTimer";
@@ -142,16 +142,28 @@ function App() {
         toastError("Only video files (.mp4 .mov .avi .mkv) can be dropped here");
         return;
       }
-      if (videos.length > 1) {
-        toastInfo("Multiple files dropped — using the first video");
-      }
-      const path = videos[0];
       const key = targetKeyAt(pos);
       if (key !== null && key >= 1 && key <= 3) {
-        dropFileToGkey(path, key).catch((err) => toastError(errorMessage(err)));
+        // Batch sort: every dropped video goes to the target key.
+        dropFilesToGkey(videos, key)
+          .then(({ moved, failed }) => {
+            if (videos.length > 1 && moved > 0) {
+              toastSuccess(`Sorted ${moved} clip${moved === 1 ? "" : "s"}`);
+            }
+            if (failed > 0) {
+              toastError(
+                `${failed} file${failed === 1 ? "" : "s"} couldn't be moved — see the log`,
+              );
+            }
+          })
+          .catch((err) => toastError(errorMessage(err)));
       } else {
         // G4 / log / anywhere else: make it the current clip and rename it.
-        selectDroppedFile(path)
+        // Rename is single-file by nature — use the first video.
+        if (videos.length > 1) {
+          toastInfo("Multiple files dropped — renaming the first video");
+        }
+        selectDroppedFile(videos[0])
           .then((filename) => emit(EVENTS.HOTKEY_TRIGGERED, { key: 4, filename }))
           .catch((err) => toastError(errorMessage(err)));
       }

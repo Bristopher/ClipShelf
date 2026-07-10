@@ -22,6 +22,16 @@ function splitName(filename: string): { stem: string; ext: string } {
   return { stem: filename.slice(0, dot), ext: filename.slice(dot) };
 }
 
+/** Mirror of the backend's mover::expand_rename_tokens — preview only; the
+ *  raw text is what gets sent (and stored in the MRU). */
+function expandTokens(text: string): string {
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const date = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  const time = `${pad(now.getHours())}.${pad(now.getMinutes())}`;
+  return text.split("{date}").join(date).split("{time}").join(time);
+}
+
 interface RenameDialogProps {
   /** Recently used rename texts (backend-maintained), shown as chips. */
   mru: string[];
@@ -74,7 +84,9 @@ export function RenameDialog({ mru }: RenameDialogProps) {
   const invalidChar = ILLEGAL_CHARS.test(text);
   const canSubmit = text.trim().length > 0 && !invalidChar;
   const preview =
-    text.trim() && currentFilename ? `${stem} - ${text.trim()}${ext}` : "";
+    text.trim() && currentFilename
+      ? `${stem} - ${expandTokens(text.trim())}${ext}`
+      : "";
 
   const handleSubmit = () => {
     if (!canSubmit) return;
@@ -119,6 +131,9 @@ export function RenameDialog({ mru }: RenameDialogProps) {
             → {preview}
           </p>
         ) : null}
+        <p className="text-[10px] text-muted-foreground">
+          Tokens: {"{date}"} → today's date, {"{time}"} → current time
+        </p>
         {mru.length > 0 && (
           <div className="flex flex-wrap gap-1">
             {mru.map((t) => (

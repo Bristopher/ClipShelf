@@ -100,8 +100,39 @@ users get confused.)
 
 ## Cross-cutting
 
-- New commands registered in lib.rs: `drop_file_to_gkey`,
-  `select_dropped_file`, `get_gkey_stats`, `get_diagnostics`.
+- New commands registered in lib.rs: `drop_files_to_gkey`,
+  `select_dropped_file`, `get_gkey_stats`, `get_diagnostics`,
+  `test_obs_connection`.
 - `hotkey-triggered` payload extended: `{ key, filename? }` — backward
   compatible (Rust hotkey path still sends just `key`).
 - All new frontend actions `.catch(toastError)`.
+
+## Round 2 (same day): deferred pieces picked up
+
+- **Batch drop**: `drop_file_to_gkey` became `drop_files_to_gkey(paths,
+  key)` — every dropped video sorts to the target key on one blocking-pool
+  pass; returns `{moved, failed}` for a summary toast (per-file failures
+  still log/emit individually). Undo remains one-file-at-a-time. Drops on
+  the rename area stay single-file (dialog is single-file by nature).
+- **Persistent daily stats**: new `stats.rs` — `gkey_stats.toml` next to
+  the config (same file-outside-AppConfig rationale as window_layout).
+  Named g1/g2/g3 fields, NOT a keyed map: TOML only allows string map keys
+  and `HashMap<u8,_>` silently fails to serialize (caught by test).
+  Counts roll over at local midnight (checked on load AND on increment for
+  app-running-past-midnight); saved after each move outside the state
+  lock. AppState now splits `daily_stats` (persistent counts) from
+  `gkey_recent` (session-only flyout list); flyout only opens once
+  something moved this session, badge shows "today" always.
+- **Rename tokens**: `{date}` → YYYY-MM-DD, `{time}` → HH.MM (dots;
+  colons illegal in filenames). Expanded backend-side in
+  `mover::expand_rename_tokens` so the MRU stores the RAW template
+  ("scrim {date}" stays reusable); dialog preview mirrors the expansion
+  in JS and a hint line documents the tokens.
+- **First-run OBS test**: `test_obs_connection(password)` command — a
+  one-shot Hello/Identify handshake (shared `identify_payload` helper
+  extracted from `connect_and_run`), 5s timeout, OBS close code 4009
+  mapped to "Authentication failed". Test button + inline result in the
+  setup window's OBS section.
+
+Still deferred: flyout thumbnails (dependency-heavy), `{n}` counter token
+(semantics undecided).

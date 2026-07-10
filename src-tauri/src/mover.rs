@@ -164,6 +164,18 @@ pub fn move_or_rename_file(
     })
 }
 
+// --- Rename tokens ---
+
+/// Expand tokens in rename text: `{date}` → local YYYY-MM-DD, `{time}` →
+/// HH.MM (dots — colons are illegal in Windows filenames). The rename MRU
+/// stores the RAW text so a template like "scrim {date}" stays reusable;
+/// only the filename gets the expansion. The frontend preview mirrors this.
+pub fn expand_rename_tokens(text: &str) -> String {
+    let now = chrono::Local::now();
+    text.replace("{date}", &now.format("%Y-%m-%d").to_string())
+        .replace("{time}", &now.format("%H.%M").to_string())
+}
+
 // --- rename_file_with_text ---
 
 pub fn rename_file_with_text(file_path: &Path, text: &str) -> Result<MoveResult, String> {
@@ -312,6 +324,21 @@ mod tests {
         // New file should be under videos_folder/sort/AHK sort/odd or checked (G2)/
         let expected_parent = dir.path().join("sort").join("AHK sort").join("odd or checked (G2)");
         assert_eq!(result.new_path.parent().unwrap(), expected_parent.as_path());
+    }
+
+    #[test]
+    fn test_expand_rename_tokens() {
+        let now = chrono::Local::now();
+        let date = now.format("%Y-%m-%d").to_string();
+        let time = now.format("%H.%M").to_string();
+
+        assert_eq!(
+            expand_rename_tokens("scrim {date} clutch"),
+            format!("scrim {} clutch", date)
+        );
+        assert_eq!(expand_rename_tokens("{date} {time}"), format!("{} {}", date, time));
+        // No tokens → unchanged.
+        assert_eq!(expand_rename_tokens("plain text"), "plain text");
     }
 
     #[test]

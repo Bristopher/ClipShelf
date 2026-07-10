@@ -31,9 +31,11 @@ export const getWatcherStatus = () =>
   invoke<{ status: string; restartCount?: number }>("get_watcher_status");
 export const getObsStatus = () =>
   invoke<{ status: string; attempt?: number }>("get_obs_status");
-export const dropFileToGkey = (path: string, key: number) =>
-  invoke<void>("drop_file_to_gkey", { path, key });
+export const dropFilesToGkey = (paths: string[], key: number) =>
+  invoke<{ moved: number; failed: number }>("drop_files_to_gkey", { paths, key });
 export const selectDroppedFile = (path: string) =>
   invoke<string>("select_dropped_file", { path });
 export const getGkeyStats = () => invoke<GKeyStat[]>("get_gkey_stats");
 export const getDiagnostics = () => invoke<Diagnostics>("get_diagnostics");
+export const testObsConnection = (password: string) =>
+  invoke<void>("test_obs_connection", { password });

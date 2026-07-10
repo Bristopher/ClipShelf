@@ -31,16 +31,6 @@ pub const UNDO_STACK_MAX: usize = 20;
 /// How many recent clips to remember per G-key for the sidebar flyout.
 pub const GKEY_RECENT_MAX: usize = 5;
 
-/// Session-only per-G-key move stats: how many clips were sorted with this
-/// key and where the last few ended up. Answers "did that sort land where I
-/// think it did?" without reading the log. Resets on launch.
-#[derive(Debug, Clone, Default)]
-pub struct GKeyStat {
-    pub count: u32,
-    /// Newest first, capped at GKEY_RECENT_MAX.
-    pub recent: Vec<PathBuf>,
-}
-
 pub struct AppStateInner {
     pub current_file: Option<CurrentFile>,
     pub bind_chosen: Option<String>,
@@ -82,8 +72,13 @@ pub struct AppStateInner {
     /// Same rationale as `last_watcher_status`.
     pub last_obs_status: String,
 
-    /// Session-only per-G-key move stats, keyed 1-3.
-    pub gkey_stats: HashMap<u8, GKeyStat>,
+    /// Session-only recent destinations per G-key (1-3), newest first,
+    /// capped at GKEY_RECENT_MAX — feeds the sidebar flyout.
+    pub gkey_recent: HashMap<u8, Vec<PathBuf>>,
+
+    /// Persistent "today" move counts per G-key (gkey_stats.toml, rolls
+    /// over at local midnight). Saved after each move, outside the lock.
+    pub daily_stats: crate::stats::DailyStats,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -103,6 +98,7 @@ pub struct CalibrationSample {
 impl AppStateInner {
     pub fn new(config: AppConfig, config_path: PathBuf) -> Self {
         let logger = AppLogger::new(&config.videos_folder, config.log_file_enabled);
+        let daily_stats = crate::stats::load(&crate::stats::stats_path(&config_path));
         Self {
             current_file: None,
             bind_chosen: None,
@@ -118,7 +114,8 @@ impl AppStateInner {
             watch_paused: false,
             last_watcher_status: "stopped".to_string(),
             last_obs_status: "disabled".to_string(),
-            gkey_stats: HashMap::new(),
+            gkey_recent: HashMap::new(),
+            daily_stats,
         }
     }
 
@@ -130,13 +127,15 @@ impl AppStateInner {
         self.undo_stack.push(entry);
     }
 
-    /// Record a successful G-key move for the session stats.
+    /// Record a successful G-key move: bumps the persistent daily count and
+    /// the session recent list. Caller saves `daily_stats` to disk OUTSIDE
+    /// the state lock.
     pub fn record_gkey_move(&mut self, key: u8, dest: PathBuf) {
-        let stat = self.gkey_stats.entry(key).or_default();
-        stat.count += 1;
-        stat.recent.retain(|p| p != &dest);
-        stat.recent.insert(0, dest);
-        stat.recent.truncate(GKEY_RECENT_MAX);
+        self.daily_stats.increment(key);
+        let recent = self.gkey_recent.entry(key).or_default();
+        recent.retain(|p| p != &dest);
+        recent.insert(0, dest);
+        recent.truncate(GKEY_RECENT_MAX);
     }
 }
 
@@ -166,19 +165,19 @@ mod tests {
         }
         s.record_gkey_move(2, PathBuf::from("C:/clips/other.mp4"));
 
-        let g1 = s.gkey_stats.get(&1).unwrap();
-        assert_eq!(g1.count, 7);
-        assert_eq!(g1.recent.len(), GKEY_RECENT_MAX);
-        assert_eq!(g1.recent[0], PathBuf::from("C:/clips/clip6.mp4"));
+        let g1 = s.gkey_recent.get(&1).unwrap();
+        assert_eq!(s.daily_stats.count(1), 7);
+        assert_eq!(g1.len(), GKEY_RECENT_MAX);
+        assert_eq!(g1[0], PathBuf::from("C:/clips/clip6.mp4"));
 
         // Re-recording the same destination moves it to the front instead
         // of duplicating it (count still increments — it was a real move).
         s.record_gkey_move(1, PathBuf::from("C:/clips/clip3.mp4"));
-        let g1 = s.gkey_stats.get(&1).unwrap();
-        assert_eq!(g1.count, 8);
-        assert_eq!(g1.recent[0], PathBuf::from("C:/clips/clip3.mp4"));
-        assert_eq!(g1.recent.len(), GKEY_RECENT_MAX);
+        assert_eq!(s.daily_stats.count(1), 8);
+        let g1 = s.gkey_recent.get(&1).unwrap();
+        assert_eq!(g1[0], PathBuf::from("C:/clips/clip3.mp4"));
+        assert_eq!(g1.len(), GKEY_RECENT_MAX);
 
-        assert_eq!(s.gkey_stats.get(&2).unwrap().count, 1);
+        assert_eq!(s.daily_stats.count(2), 1);
     }
 }

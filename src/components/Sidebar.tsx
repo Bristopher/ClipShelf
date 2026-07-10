@@ -99,7 +99,9 @@ export function Sidebar({ config, dropKey }: SidebarProps) {
           <div
             key={g.key}
             className="relative"
-            onMouseEnter={() => (stat?.count ? openFlyout(g.key) : undefined)}
+            // Counts persist across launches but the recent list is
+            // session-only — no flyout until something moved this session.
+            onMouseEnter={() => (stat?.recent.length ? openFlyout(g.key) : undefined)}
             onMouseLeave={closeFlyout}
           >
             <button
@@ -135,10 +137,10 @@ export function Sidebar({ config, dropKey }: SidebarProps) {
                 </span>
               )}
             </button>
-            {flyoutKey === g.key && stat && stat.count > 0 && (
+            {flyoutKey === g.key && stat && stat.recent.length > 0 && (
               <div className="absolute left-full top-0 ml-1.5 z-50 w-56 rounded-md border border-t-border bg-panel shadow-lg p-2 animate-in fade-in-0 zoom-in-95 duration-150">
                 <p className="text-[10px] font-semibold text-t-text truncate">
-                  {g.folder || g.label} — {stat.count} this session
+                  {g.folder || g.label} — {stat.count} today
                 </p>
                 <div className="mt-1 space-y-0.5">
                   {stat.recent.map((clip) => (

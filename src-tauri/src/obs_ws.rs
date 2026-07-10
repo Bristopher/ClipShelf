@@ -38,6 +38,81 @@ pub fn build_auth_string(password: &str, salt: &str, challenge: &str) -> String 
     STANDARD.encode(auth_bytes)
 }
 
+/// Build the op=1 Identify payload answering a Hello message's `d` field
+/// (with auth when the server requests it).
+fn identify_payload(password: &str, hello_d: Option<&serde_json::Value>) -> serde_json::Value {
+    if let Some(auth) = hello_d.and_then(|d| d.get("authentication")) {
+        let salt = auth.get("salt").and_then(|v| v.as_str()).unwrap_or("");
+        let challenge = auth.get("challenge").and_then(|v| v.as_str()).unwrap_or("");
+        let auth_string = build_auth_string(password, salt, challenge);
+        serde_json::json!({
+            "op": 1,
+            "d": {
+                "rpcVersion": 1,
+                "authentication": auth_string,
+                "eventSubscriptions": 1000
+            }
+        })
+    } else {
+        serde_json::json!({
+            "op": 1,
+            "d": {
+                "rpcVersion": 1,
+                "eventSubscriptions": 1000
+            }
+        })
+    }
+}
+
+/// One-shot connection test for the setup flow: connect, run the
+/// Hello/Identify handshake, report the outcome. Independent of the
+/// long-lived actor — no state, no reconnect loop.
+pub async fn test_connection(password: &str) -> Result<(), String> {
+    let url = "ws://localhost:4455";
+    let (ws_stream, _response) = connect_async(url).await.map_err(|_| {
+        "Couldn't reach OBS — is it running with the WebSocket server enabled?".to_string()
+    })?;
+    let (mut write, mut read) = ws_stream.split();
+
+    while let Some(msg) = read.next().await {
+        match msg.map_err(|e| format!("read error: {e}"))? {
+            Message::Text(text) => {
+                let value: serde_json::Value =
+                    serde_json::from_str(&text).map_err(|e| format!("protocol error: {e}"))?;
+                match value.get("op").and_then(|v| v.as_u64()) {
+                    Some(0) => {
+                        let payload = identify_payload(password, value.get("d"));
+                        let msg_text = serde_json::to_string(&payload)
+                            .map_err(|e| format!("serialize error: {e}"))?;
+                        write
+                            .send(Message::Text(msg_text.into()))
+                            .await
+                            .map_err(|e| format!("send error: {e}"))?;
+                    }
+                    Some(2) => return Ok(()),
+                    _ => {}
+                }
+            }
+            Message::Close(frame) => {
+                let (code, reason) = match frame {
+                    Some(f) => (Some(u16::from(f.code)), f.reason.to_string()),
+                    None => (None, String::new()),
+                };
+                // OBS closes with 4009 when authentication fails.
+                return Err(if code == Some(4009) {
+                    "Authentication failed — check the password".to_string()
+                } else if reason.is_empty() {
+                    "OBS closed the connection".to_string()
+                } else {
+                    format!("OBS closed the connection: {}", reason)
+                });
+            }
+            _ => {}
+        }
+    }
+    Err("Connection ended before identifying".to_string())
+}
+
 /// Spawns the OBS WebSocket actor. Always spawned at startup regardless of
 /// config — while disabled it idles waiting for a `Configure`; while enabled
 /// it reconnects forever with capped backoff, so OBS starting *after* this
@@ -196,38 +271,7 @@ async fn connect_and_run(
                 match op {
                     // op=0: Hello
                     0 => {
-                        let d = value.get("d");
-                        let auth_field = d
-                            .and_then(|d| d.get("authentication"));
-
-                        let payload = if let Some(auth) = auth_field {
-                            let salt = auth
-                                .get("salt")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("");
-                            let challenge = auth
-                                .get("challenge")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("");
-                            let auth_string = build_auth_string(password, salt, challenge);
-                            serde_json::json!({
-                                "op": 1,
-                                "d": {
-                                    "rpcVersion": 1,
-                                    "authentication": auth_string,
-                                    "eventSubscriptions": 1000
-                                }
-                            })
-                        } else {
-                            serde_json::json!({
-                                "op": 1,
-                                "d": {
-                                    "rpcVersion": 1,
-                                    "eventSubscriptions": 1000
-                                }
-                            })
-                        };
-
+                        let payload = identify_payload(password, value.get("d"));
                         let msg_text = serde_json::to_string(&payload)
                             .map_err(|e| format!("serialize error: {e}"))?;
                         write

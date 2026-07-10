@@ -171,6 +171,7 @@ pub fn do_press_gkey(app: &AppHandle, state: &AppState, key: u8) {
 /// then state/current-file/undo/stats bookkeeping, log + events, sound.
 /// Used by key presses (current clip) and drag-drops (explicit path).
 /// Blocking (retry sleeps) — callers run it off the async workers.
+/// Returns whether the move succeeded (batch drops count outcomes).
 fn move_file_with_key(
     app: &AppHandle,
     state: &AppState,
@@ -178,10 +179,10 @@ fn move_file_with_key(
     key: u8,
     log_label: &str,
     config: &AppConfig,
-) {
+) -> bool {
     match mover::move_or_rename_file(file_path, key, config) {
         Ok(result) => {
-            let Ok(mut s) = state.lock() else { return };
+            let Ok(mut s) = state.lock() else { return false };
             s.current_file = Some(CurrentFile {
                 path: result.new_path.clone(),
                 moved_path: None,
@@ -222,13 +223,19 @@ fn move_file_with_key(
                 s.logger
                     .write_to_file(&format!("{} | {}", log_label, basename));
             }
+            // Persist the bumped daily count — disk write outside the lock.
+            let daily = s.daily_stats.clone();
+            let stats_path = crate::stats::stats_path(&s.config_path);
+            drop(s);
+            crate::stats::save(&stats_path, &daily);
             if config.move_sound_enabled {
                 let resource_dir = app.path().resource_dir().unwrap_or_default();
                 sound::play_move_beep(&resource_dir);
             }
+            true
         }
         Err(e) => {
-            let Ok(mut s) = state.lock() else { return };
+            let Ok(mut s) = state.lock() else { return false };
             let entry = s.logger.log(
                 LogLevel::Error,
                 format!("Move failed: {}", e),
@@ -242,39 +249,61 @@ fn move_file_with_key(
                     context: "move".to_string(),
                 },
             );
+            false
         }
     }
 }
 
-/// A file dragged from Explorer and dropped onto a G-key button — sort that
-/// exact file through the normal move path. Manual fallback for clips the
-/// watcher missed, or for sorting old clips.
+/// Outcome of a (possibly multi-file) drag-drop sort.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchDropResult {
+    pub moved: u32,
+    pub failed: u32,
+}
+
+/// Files dragged from Explorer and dropped onto a G-key button — sort each
+/// through the normal move path. Manual fallback for clips the watcher
+/// missed, or for bulk-sorting old clips. Per-file failures are logged and
+/// emitted as error events by the move path; the summary comes back here.
 #[tauri::command]
-pub async fn drop_file_to_gkey(
-    path: String,
+pub async fn drop_files_to_gkey(
+    paths: Vec<String>,
     key: u8,
     state: State<'_, AppState>,
     app: AppHandle,
-) -> Result<(), String> {
-    let file_path = std::path::PathBuf::from(&path);
-    if !crate::watcher::is_video_file(&file_path) {
-        return Err("Not a video file".to_string());
-    }
-    if !file_path.exists() {
-        return Err("File no longer exists at this location".to_string());
-    }
+) -> Result<BatchDropResult, String> {
     if !(1..=3).contains(&key) {
         return Err(format!("Invalid gkey: {}. Must be 1, 2, or 3.", key));
     }
+    if paths.is_empty() {
+        return Err("No files dropped".to_string());
+    }
     let st = state.inner().clone();
-    // Blocking pool — the move retries with sleeps, same as the hotkey path.
+    // Blocking pool — each move retries with sleeps, same as the hotkey path.
     tauri::async_runtime::spawn_blocking(move || {
         let config = {
-            let Ok(s) = st.lock() else { return };
+            let Ok(s) = st.lock() else {
+                return BatchDropResult { moved: 0, failed: paths.len() as u32 };
+            };
             s.config.clone()
         };
         let label = format!("G{} (drop)", key);
-        move_file_with_key(&app, &st, &file_path, key, &label, &config);
+        let mut moved = 0u32;
+        let mut failed = 0u32;
+        for path in &paths {
+            let file_path = std::path::PathBuf::from(path);
+            if !crate::watcher::is_video_file(&file_path) || !file_path.exists() {
+                failed += 1;
+                continue;
+            }
+            if move_file_with_key(&app, &st, &file_path, key, &label, &config) {
+                moved += 1;
+            } else {
+                failed += 1;
+            }
+        }
+        BatchDropResult { moved, failed }
     })
     .await
     .map_err(|e| e.to_string())
@@ -317,31 +346,48 @@ pub fn select_dropped_file(
     Ok(filename)
 }
 
-/// Session move stats for all G-keys (sidebar badges + flyouts).
+/// Move stats for all G-keys (sidebar badges + flyouts): persistent "today"
+/// counts + session-only recent destinations.
 #[tauri::command]
 pub fn get_gkey_stats(state: State<'_, AppState>) -> Result<Vec<GKeyStatPayload>, String> {
     let s = state.lock().map_err(|e| e.to_string())?;
     Ok((1u8..=3)
-        .map(|key| {
-            let stat = s.gkey_stats.get(&key).cloned().unwrap_or_default();
-            GKeyStatPayload {
-                key,
-                count: stat.count,
-                recent: stat
-                    .recent
-                    .iter()
-                    .map(|p| RecentClipPayload {
-                        name: p
-                            .file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or("unknown")
-                            .to_string(),
-                        path: p.to_string_lossy().to_string(),
-                    })
-                    .collect(),
-            }
+        .map(|key| GKeyStatPayload {
+            key,
+            count: s.daily_stats.count(key),
+            recent: s
+                .gkey_recent
+                .get(&key)
+                .map(|list| {
+                    list.iter()
+                        .map(|p| RecentClipPayload {
+                            name: p
+                                .file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or("unknown")
+                                .to_string(),
+                            path: p.to_string_lossy().to_string(),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
         })
         .collect())
+}
+
+/// One-shot OBS WebSocket connection test (first-run setup). Bounded at 5s
+/// so a black-holed port can't leave the button spinning forever.
+#[tauri::command]
+pub async fn test_obs_connection(password: String) -> Result<(), String> {
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        crate::obs_ws::test_connection(&password),
+    )
+    .await
+    {
+        Ok(result) => result,
+        Err(_) => Err("Timed out waiting for OBS".to_string()),
+    }
 }
 
 /// Snapshot for the diagnostics popover.
@@ -398,7 +444,10 @@ fn do_rename_file(app: &AppHandle, state: &AppState, text: &str) {
         (file_path, s.config.log_file_enabled)
     };
 
-    match mover::rename_file_with_text(&file_path, text) {
+    // {date}/{time} tokens expand into the filename; the MRU keeps the raw
+    // text so templates stay reusable.
+    let expanded = mover::expand_rename_tokens(text);
+    match mover::rename_file_with_text(&file_path, &expanded) {
         Ok(result) => {
             let Ok(mut s) = state.lock() else { return };
             s.current_file = Some(CurrentFile {

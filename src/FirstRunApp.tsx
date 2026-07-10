@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { KeybindInput } from "@/components/KeybindInput";
 import { Folder, Sparkles } from "lucide-react";
-import { getConfig, updateConfig } from "@/lib/commands";
+import { getConfig, testObsConnection, updateConfig } from "@/lib/commands";
 import { EVENTS } from "@/lib/events";
 import { refreshSystemMode } from "@/lib/systemTheme";
 import { useTheme } from "@/hooks/useTheme";
@@ -28,6 +28,7 @@ export function FirstRunApp() {
   const [saveClipBind, setSaveClipBind] = useState("");
   const [obsEnabled, setObsEnabled] = useState(false);
   const [obsPassword, setObsPassword] = useState("");
+  const [obsTest, setObsTest] = useState<null | "testing" | "ok" | { error: string }>(null);
   const [saving, setSaving] = useState(false);
   useTheme(config, null);
 
@@ -186,17 +187,44 @@ export function FirstRunApp() {
           </p>
           {obsEnabled && (
             <>
-              <Input
-                type="password"
-                value={obsPassword}
-                onChange={(e) => setObsPassword(e.target.value)}
-                placeholder="WebSocket server password"
-                className="text-xs h-8"
-              />
-              <p className="text-[10px] text-t-muted">
-                Connection status shows in the main window (OBS dot) right
-                after setup.
-              </p>
+              <div className="flex gap-2">
+                <Input
+                  type="password"
+                  value={obsPassword}
+                  onChange={(e) => {
+                    setObsPassword(e.target.value);
+                    setObsTest(null);
+                  }}
+                  placeholder="WebSocket server password"
+                  className="text-xs h-8 flex-1"
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 text-xs shrink-0"
+                  disabled={obsTest === "testing"}
+                  onClick={() => {
+                    setObsTest("testing");
+                    testObsConnection(obsPassword)
+                      .then(() => setObsTest("ok"))
+                      .catch((e) => setObsTest({ error: errorMessage(e) }));
+                  }}
+                >
+                  {obsTest === "testing" ? "Testing..." : "Test"}
+                </Button>
+              </div>
+              {obsTest === "ok" ? (
+                <p className="text-[10px] text-green-400">
+                  Connected — OBS is reachable and the password works.
+                </p>
+              ) : obsTest && obsTest !== "testing" ? (
+                <p className="text-[10px] text-red-400">{obsTest.error}</p>
+              ) : (
+                <p className="text-[10px] text-t-muted">
+                  Connection status also shows in the main window (OBS dot)
+                  after setup.
+                </p>
+              )}
             </>
           )}
         </div>
