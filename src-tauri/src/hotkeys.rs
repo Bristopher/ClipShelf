@@ -49,6 +49,33 @@ pub enum HotkeyAction {
     Undo,
 }
 
+impl HotkeyAction {
+    /// Human-readable name for UI-facing failure messages.
+    pub fn label(&self) -> &'static str {
+        match self {
+            HotkeyAction::MoveG1 => "G1 move",
+            HotkeyAction::MoveG2 => "G2 move",
+            HotkeyAction::MoveG3 => "G3 move",
+            HotkeyAction::Rename => "Rename",
+            HotkeyAction::RestartWatcher => "Restart watcher",
+            HotkeyAction::SaveClipHealthCheck => "Save-clip health check",
+            HotkeyAction::CountUpToggle => "Count-up toggle",
+            HotkeyAction::Undo => "Undo",
+        }
+    }
+}
+
+/// A hotkey that failed to parse or register. Surfaced to the UI — a silent
+/// failure here means a G-key just stops working after a Settings save (e.g.
+/// another app already owns the combo) with no visible indication.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HotkeyRegFailure {
+    pub action: String,
+    pub binding: String,
+    pub reason: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct HotkeyBinding {
     pub ctrl: bool,
@@ -184,17 +211,20 @@ pub fn bindings_from_config(config: &crate::config::AppConfig) -> Vec<(HotkeyAct
 
 /// Register a fresh set of hotkeys, replacing any previously registered
 /// IDs in `registered`. Must be called from the message-pump thread —
-/// RegisterHotKey is per-thread.
+/// RegisterHotKey is per-thread. Returns the bindings that failed so the
+/// caller can surface them to the UI.
 fn apply_bindings(
     bindings: Vec<(HotkeyAction, String)>,
     registered: &mut Vec<(i32, HotkeyAction)>,
-) {
+) -> Vec<HotkeyRegFailure> {
     // Unregister existing IDs first.
     for (id, _) in registered.drain(..) {
         unsafe {
             UnregisterHotKey(std::ptr::null_mut(), id);
         }
     }
+
+    let mut failures = Vec::new();
 
     for (idx, (action, binding_str)) in bindings.into_iter().enumerate() {
         let hotkey_id = (idx + 1) as i32; // IDs must be > 0
@@ -203,6 +233,11 @@ fn apply_bindings(
             Ok(b) => b,
             Err(e) => {
                 log::warn!("Failed to parse hotkey binding '{}': {}", binding_str, e);
+                failures.push(HotkeyRegFailure {
+                    action: action.label().to_string(),
+                    binding: binding_str,
+                    reason: e,
+                });
                 continue;
             }
         };
@@ -233,6 +268,12 @@ fn apply_bindings(
                 action,
                 binding_str
             );
+            failures.push(HotkeyRegFailure {
+                action: action.label().to_string(),
+                binding: binding_str,
+                reason: "already in use by another application (or invalid combo)"
+                    .to_string(),
+            });
         } else {
             log::info!(
                 "Registered hotkey id={} for action {:?}",
@@ -242,12 +283,22 @@ fn apply_bindings(
             registered.push((hotkey_id, action));
         }
     }
+
+    failures
 }
 
 pub fn spawn_hotkey_listener(
     initial_bindings: Vec<(HotkeyAction, String)>,
-) -> Result<(mpsc::Receiver<HotkeyAction>, HotkeyController), String> {
+) -> Result<
+    (
+        mpsc::Receiver<HotkeyAction>,
+        mpsc::Receiver<Vec<HotkeyRegFailure>>,
+        HotkeyController,
+    ),
+    String,
+> {
     let (tx, rx) = mpsc::channel::<HotkeyAction>(32);
+    let (failure_tx, failure_rx) = mpsc::channel::<Vec<HotkeyRegFailure>>(8);
     let pending: Arc<Mutex<Option<Vec<(HotkeyAction, String)>>>> = Arc::new(Mutex::new(None));
     let pending_clone = pending.clone();
 
@@ -263,7 +314,10 @@ pub fn spawn_hotkey_listener(
         let _ = tid_tx.send(tid);
 
         let mut registered: Vec<(i32, HotkeyAction)> = Vec::new();
-        apply_bindings(initial_bindings, &mut registered);
+        let failures = apply_bindings(initial_bindings, &mut registered);
+        if !failures.is_empty() {
+            let _ = failure_tx.blocking_send(failures);
+        }
 
         loop {
             let mut msg: MSG = unsafe { std::mem::zeroed() };
@@ -289,7 +343,10 @@ pub fn spawn_hotkey_listener(
                     let new_bindings = pending_clone.lock().unwrap().take();
                     if let Some(bindings) = new_bindings {
                         log::info!("Reloading hotkey bindings ({} entries)", bindings.len());
-                        apply_bindings(bindings, &mut registered);
+                        let failures = apply_bindings(bindings, &mut registered);
+                        if !failures.is_empty() {
+                            let _ = failure_tx.blocking_send(failures);
+                        }
                     }
                 }
                 _ => {}
@@ -308,7 +365,7 @@ pub fn spawn_hotkey_listener(
         .recv()
         .map_err(|e| format!("Hotkey listener didn't report its thread id: {}", e))?;
 
-    Ok((rx, HotkeyController { thread_id, pending }))
+    Ok((rx, failure_rx, HotkeyController { thread_id, pending }))
 }
 
 #[cfg(test)]

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import {
   Dialog,
@@ -11,29 +11,45 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { EVENTS } from "@/lib/events";
 import { renameFile } from "@/lib/commands";
+import { errorMessage, toastError } from "@/lib/toast";
 import type { FileCreatedEvent } from "@/types";
+
+const ILLEGAL_CHARS = /[<>:"/\\|?*]/;
+
+function splitName(filename: string): { stem: string; ext: string } {
+  const dot = filename.lastIndexOf(".");
+  if (dot <= 0) return { stem: filename, ext: "" };
+  return { stem: filename.slice(0, dot), ext: filename.slice(dot) };
+}
 
 export function RenameDialog() {
   const [isOpen, setIsOpen] = useState(false);
   const [currentFilename, setCurrentFilename] = useState("");
   const [text, setText] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+  // Ref mirror so the open-listener (mounted once) sees the latest filename.
+  const filenameRef = useRef("");
 
   // Track latest created filename
   useEffect(() => {
     const unlisten = listen<FileCreatedEvent>(EVENTS.FILE_CREATED, (event) => {
       setCurrentFilename(event.payload.filename);
+      filenameRef.current = event.payload.filename;
     });
     return () => {
       unlisten.then((fn) => fn());
     };
   }, []);
 
-  // Open dialog when hotkey-triggered with key=4
+  // Open dialog when hotkey-triggered with key=4. The backend APPENDS the
+  // text (" - {text}") to the existing name, so the input starts empty and
+  // the preview line below shows the resulting filename live.
   useEffect(() => {
     const unlisten = listen<{ key: number }>(EVENTS.HOTKEY_TRIGGERED, (event) => {
       if (event.payload.key === 4) {
         setText("");
         setIsOpen(true);
+        requestAnimationFrame(() => inputRef.current?.focus());
       }
     });
     return () => {
@@ -41,10 +57,15 @@ export function RenameDialog() {
     };
   }, []);
 
+  const { stem, ext } = splitName(currentFilename);
+  const invalidChar = ILLEGAL_CHARS.test(text);
+  const canSubmit = text.trim().length > 0 && !invalidChar;
+  const preview =
+    text.trim() && currentFilename ? `${stem} - ${text.trim()}${ext}` : "";
+
   const handleSubmit = () => {
-    if (text.trim()) {
-      renameFile(text.trim());
-    }
+    if (!canSubmit) return;
+    renameFile(text.trim()).catch((e) => toastError(errorMessage(e)));
     setIsOpen(false);
   };
 
@@ -67,18 +88,29 @@ export function RenameDialog() {
           </p>
         )}
         <Input
+          ref={inputRef}
           autoFocus
-          placeholder="Enter new name..."
+          placeholder="Text to append (e.g. clutch ace)..."
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={handleKeyDown}
           className="text-sm"
+          aria-invalid={invalidChar}
         />
+        {invalidChar ? (
+          <p className="text-[11px] text-red-400">
+            {'Name can\'t contain < > : " / \\ | ? *'}
+          </p>
+        ) : preview ? (
+          <p className="text-[11px] text-muted-foreground truncate">
+            → {preview}
+          </p>
+        ) : null}
         <DialogFooter>
           <Button variant="ghost" size="sm" onClick={() => setIsOpen(false)}>
             Cancel
           </Button>
-          <Button size="sm" onClick={handleSubmit}>
+          <Button size="sm" onClick={handleSubmit} disabled={!canSubmit}>
             Rename
           </Button>
         </DialogFooter>

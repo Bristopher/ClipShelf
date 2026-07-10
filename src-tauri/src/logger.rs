@@ -5,6 +5,11 @@ use std::path::PathBuf;
 
 use crate::events::{LogCategory, LogEntryPayload, LogLevel};
 
+/// Cap on the in-memory buffers. With autostart the app can run for days;
+/// unbounded Vecs would grow forever. Oldest entries are evicted — the
+/// on-disk daily log keeps the full record.
+const MAX_ENTRIES: usize = 5000;
+
 pub struct AppLogger {
     history: Vec<LogEntryPayload>,
     display_buffer: Vec<LogEntryPayload>,
@@ -81,6 +86,14 @@ impl AppLogger {
         };
         self.history.push(entry.clone());
         self.display_buffer.push(entry.clone());
+        if self.history.len() > MAX_ENTRIES {
+            let excess = self.history.len() - MAX_ENTRIES;
+            self.history.drain(..excess);
+        }
+        if self.display_buffer.len() > MAX_ENTRIES {
+            let excess = self.display_buffer.len() - MAX_ENTRIES;
+            self.display_buffer.drain(..excess);
+        }
         entry
     }
 
@@ -192,6 +205,22 @@ mod tests {
         assert_eq!(restored.len(), 2);
         assert_eq!(restored[0].message, "file created");
         assert_eq!(restored[1].message, "file moved");
+    }
+
+    #[test]
+    fn test_buffers_capped_evicting_oldest() {
+        let mut logger = make_logger();
+        for i in 0..(MAX_ENTRIES + 10) {
+            logger.log(LogLevel::Info, format!("entry {}", i), LogCategory::System);
+        }
+        assert_eq!(logger.history().len(), MAX_ENTRIES);
+        assert_eq!(logger.display_entries().len(), MAX_ENTRIES);
+        // Oldest evicted, newest kept.
+        assert_eq!(logger.history()[0].message, "entry 10");
+        assert_eq!(
+            logger.history().last().unwrap().message,
+            format!("entry {}", MAX_ENTRIES + 9)
+        );
     }
 
     #[test]

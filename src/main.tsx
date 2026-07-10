@@ -4,6 +4,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import App from "./App";
 import { SettingsApp } from "./SettingsApp";
 import { FirstRunApp } from "./FirstRunApp";
+import { toastError } from "./lib/toast";
 import "./index.css";
 
 // Any uncaught error paints to the page — otherwise a broken secondary
@@ -39,9 +40,16 @@ function renderFatal(message: string, stack?: string) {
 window.addEventListener("error", (e) => {
   renderFatal(e.message, e.error?.stack);
 });
+// A rejected promise is almost always a recoverable backend error (a failed
+// invoke — "no clip to move", locked file, ...), not a broken UI. Show a
+// dismissible toast and keep the app alive; renderFatal here used to replace
+// the whole window with the red error page over a routine failure.
 window.addEventListener("unhandledrejection", (e) => {
+  e.preventDefault();
   const reason: any = e.reason;
-  renderFatal(String(reason?.message || reason), reason?.stack);
+  const message = String(reason?.message || reason);
+  console.error("Unhandled rejection:", reason);
+  toastError(message);
 });
 
 // Tauri injects the window label into the webview; use it to decide which

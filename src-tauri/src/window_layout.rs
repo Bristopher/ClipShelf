@@ -41,7 +41,10 @@ pub fn load(path: &Path) -> Option<WindowLayout> {
 
 pub fn save(path: &Path, layout: &WindowLayout) {
     if let Ok(contents) = toml::to_string(layout) {
-        if let Err(e) = std::fs::write(path, contents) {
+        // Temp-then-rename so a crash mid-write can't corrupt the file.
+        let tmp = path.with_extension("toml.tmp");
+        let result = std::fs::write(&tmp, contents).and_then(|_| std::fs::rename(&tmp, path));
+        if let Err(e) = result {
             log::warn!("Failed to save window layout: {}", e);
         }
     }

@@ -8,6 +8,8 @@ import { refreshSystemMode } from "@/lib/systemTheme";
 import { useTheme } from "@/hooks/useTheme";
 import { SettingsForm } from "@/components/SettingsForm";
 import { WindowChrome } from "@/components/WindowChrome";
+import { Toaster } from "@/components/Toaster";
+import { errorMessage, toastError, toastSuccess } from "@/lib/toast";
 import type { AppConfig } from "@/types";
 
 const appWindow = getCurrentWindow();
@@ -70,9 +72,10 @@ export function SettingsApp() {
       const updated = await updateConfig(draft);
       setSaved(updated);
       setDraft(updated);
+      toastSuccess("Settings saved");
     } catch (err) {
       console.error(err);
-      alert(`Save failed: ${err}`);
+      toastError(`Save failed: ${errorMessage(err)}`);
     }
   };
 
@@ -99,6 +102,21 @@ export function SettingsApp() {
     flashButtonBar();
     return false;
   };
+
+  // Ctrl+S saves — the whole window is a save-gated form, so give it the
+  // universal form shortcut. Ref so the one listener sees fresh state.
+  const saveRef = useRef({ dirty, handleSave });
+  saveRef.current = { dirty, handleSave };
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        if (saveRef.current.dirty) saveRef.current.handleSave();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   // Catch Alt+F4 / right-click-titlebar-close at the OS level.
   useEffect(() => {
@@ -184,12 +202,14 @@ export function SettingsApp() {
               onClick={handleSave}
               disabled={!dirty}
               className="h-8 text-xs"
+              title="Save (Ctrl+S)"
             >
               Save
             </Button>
           </div>
         </div>
       </div>
+      <Toaster />
     </div>
   );
 }

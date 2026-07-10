@@ -12,6 +12,8 @@ import { EVENTS } from "@/lib/events";
 import { refreshSystemMode } from "@/lib/systemTheme";
 import { useTheme } from "@/hooks/useTheme";
 import { WindowChrome } from "@/components/WindowChrome";
+import { Toaster } from "@/components/Toaster";
+import { errorMessage, toastError } from "@/lib/toast";
 import logoUrl from "@/assets/gkey-logo.png";
 import type { AppConfig } from "@/types";
 
@@ -66,6 +68,10 @@ export function FirstRunApp() {
         save_clip_bind: saveClipBind,
       });
       await getCurrentWindow().hide();
+    } catch (e) {
+      // Without this, a failed save rejects unhandled and the whole setup
+      // window is replaced by the fatal error screen.
+      toastError(`Couldn't save settings: ${errorMessage(e)}`);
     } finally {
       setSaving(false);
     }
@@ -162,6 +168,7 @@ export function FirstRunApp() {
         </div>
       </div>
       </div>
+      <Toaster />
     </div>
   );
 }

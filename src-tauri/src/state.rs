@@ -58,6 +58,15 @@ pub struct AppStateInner {
     /// OBS WebSocket injection) are ignored — for reorganizing the clips
     /// folder without the app grabbing files. Runtime-only, resets on launch.
     pub watch_paused: bool,
+
+    /// Last watcher status string emitted ("running"/"stopped"/"paused").
+    /// Status events often fire before the webview finishes loading, so the
+    /// frontend fetches this on mount instead of guessing.
+    pub last_watcher_status: String,
+
+    /// Last OBS WebSocket status string emitted (see obs_ws.rs statuses).
+    /// Same rationale as `last_watcher_status`.
+    pub last_obs_status: String,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -90,6 +99,8 @@ impl AppStateInner {
             calibration: CalibrationState::default(),
             undo_stack: Vec::new(),
             watch_paused: false,
+            last_watcher_status: "stopped".to_string(),
+            last_obs_status: "disabled".to_string(),
         }
     }
 

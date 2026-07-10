@@ -130,9 +130,42 @@ pub fn run() {
             // controller into ChannelState. update_config calls
             // controller.reload(...) when the user changes any bind.
             let initial_bindings = hotkeys::bindings_from_config(&config);
-            let (mut hotkey_rx, hotkey_controller) =
+            let (mut hotkey_rx, mut hotkey_failure_rx, hotkey_controller) =
                 hotkeys::spawn_hotkey_listener(initial_bindings)
                     .expect("Failed to spawn hotkey listener");
+
+            // Surface hotkey registration failures — a bind another app owns
+            // (Discord, Steam, ...) silently stops working otherwise.
+            {
+                let app_handle = app_handle.clone();
+                let state = app_state.clone();
+                tauri::async_runtime::spawn(async move {
+                    while let Some(failures) = hotkey_failure_rx.recv().await {
+                        for f in failures {
+                            let msg = format!(
+                                "Hotkey '{}' for {} could not be registered: {}",
+                                f.binding, f.action, f.reason
+                            );
+                            {
+                                let Ok(mut s) = state.lock() else { continue };
+                                let entry = s.logger.log(
+                                    LogLevel::Error,
+                                    msg.clone(),
+                                    LogCategory::System,
+                                );
+                                let _ = app_handle.emit("log-entry", &entry);
+                            }
+                            let _ = app_handle.emit(
+                                "error",
+                                ErrorPayload {
+                                    message: msg,
+                                    context: "hotkeys".to_string(),
+                                },
+                            );
+                        }
+                    }
+                });
+            }
 
             // Spawn the OBS WebSocket actor unconditionally — while disabled
             // it just idles waiting for a Configure from update_config, so
@@ -207,6 +240,7 @@ pub fn run() {
                                 {
                                     let mut s = state.lock().unwrap();
                                     s.watcher_restart_count = restart_count;
+                                    s.last_watcher_status = status.clone();
                                     let msg = match &message {
                                         Some(m) => format!("Watcher {}: {}", status, m),
                                         None => format!("Watcher {}", status),
@@ -345,6 +379,7 @@ pub fn run() {
                         match event {
                             ObsWsEvent::Connected => {
                                 let mut s = state.lock().unwrap();
+                                s.last_obs_status = "connected".to_string();
                                 let entry = s.logger.log(
                                     LogLevel::Success,
                                     "OBS WebSocket connected".to_string(),
@@ -361,6 +396,7 @@ pub fn run() {
                             }
                             ObsWsEvent::Disconnected { code, reason } => {
                                 let mut s = state.lock().unwrap();
+                                s.last_obs_status = "disconnected".to_string();
                                 let msg = format!(
                                     "OBS WebSocket disconnected: {} (code: {:?})",
                                     reason, code
@@ -408,13 +444,25 @@ pub fn run() {
                                 }
                             }
                             ObsWsEvent::AuthError { message } => {
-                                let mut s = state.lock().unwrap();
-                                let entry = s.logger.log(
-                                    LogLevel::Error,
-                                    format!("OBS auth error: {}", message),
-                                    LogCategory::ObsWebSocket,
+                                {
+                                    let mut s = state.lock().unwrap();
+                                    let entry = s.logger.log(
+                                        LogLevel::Error,
+                                        format!("OBS auth error: {}", message),
+                                        LogCategory::ObsWebSocket,
+                                    );
+                                    let _ = app_handle.emit("log-entry", &entry);
+                                }
+                                // Wrong password is a user-fixable problem —
+                                // route it to the visible error surface, not
+                                // just the log.
+                                let _ = app_handle.emit(
+                                    "error",
+                                    ErrorPayload {
+                                        message: format!("OBS WebSocket auth failed: {}", message),
+                                        context: "obs".to_string(),
+                                    },
                                 );
-                                let _ = app_handle.emit("log-entry", &entry);
                             }
                             ObsWsEvent::Error { message } => {
                                 let mut s = state.lock().unwrap();
@@ -426,6 +474,10 @@ pub fn run() {
                                 let _ = app_handle.emit("log-entry", &entry);
                             }
                             ObsWsEvent::StatusChanged { status, attempt } => {
+                                {
+                                    let mut s = state.lock().unwrap();
+                                    s.last_obs_status = status.clone();
+                                }
                                 let _ = app_handle.emit(
                                     "obs-ws-status",
                                     ObsWsStatusPayload { status, attempt },
@@ -555,6 +607,8 @@ pub fn run() {
             commands::reveal_in_explorer,
             commands::set_watch_paused,
             commands::get_monitor_count,
+            commands::get_watcher_status,
+            commands::get_obs_status,
         ])
         .on_window_event(|window, event| {
             match event {
@@ -588,8 +642,13 @@ async fn handle_file_created(
     // watcher (or the health-check rescan). First signal wins; anything
     // re-reporting the same raw path within 10s is dropped. Also the single
     // choke point for pause: no source may inject files while paused.
+    //
+    // Check AND mark in one critical section — the OBS-WS handler and the
+    // watcher handler are independent tasks, so a check-then-mark-later
+    // pattern lets both pass the check for the same clip before either
+    // records it (double log entry, double sound, timer restarted twice).
     {
-        let s = state.lock().unwrap();
+        let mut s = state.lock().unwrap();
         if s.watch_paused {
             return;
         }
@@ -600,6 +659,8 @@ async fn handle_file_created(
                 return;
             }
         }
+        s.last_created_path = Some(path.clone());
+        s.last_file_created_at = Some(std::time::SystemTime::now());
     }
 
     let size_mb = mover::file_size_mb(&path);
@@ -623,9 +684,9 @@ async fn handle_file_created(
             renamed: false,
         });
         s.bind_chosen = None;
+        // (last_created_path / last_file_created_at were already recorded in
+        // the dedup critical section above.)
         let now = std::time::SystemTime::now();
-        s.last_file_created_at = Some(now);
-        s.last_created_path = Some(path.clone());
 
         // Calibration recording — if a save was pending, record the delta.
         let mut emit: Option<serde_json::Value> = None;

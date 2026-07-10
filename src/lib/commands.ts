@@ -16,10 +16,6 @@ export const exportTheme = (path: string, themeId: string) =>
   invoke<void>("export_theme", { path, themeId });
 export const openSettingsWindow = () => invoke<void>("open_settings_window");
 export const openFirstRunWindow = () => invoke<void>("open_first_run_window");
-export const startUserTimer = (durationSecs?: number) =>
-  invoke<void>("start_user_timer", { durationSecs });
-export const resetUserTimer = (durationSecs?: number) =>
-  invoke<void>("reset_user_timer", { durationSecs });
 export const startCalibration = (targetSamples: number) =>
   invoke<void>("start_calibration", { targetSamples });
 export const cancelCalibration = () => invoke<void>("cancel_calibration");
@@ -31,3 +27,7 @@ export const revealInExplorer = (path: string) =>
 export const setWatchPaused = (paused: boolean) =>
   invoke<void>("set_watch_paused", { paused });
 export const getMonitorCount = () => invoke<number>("get_monitor_count");
+export const getWatcherStatus = () =>
+  invoke<{ status: string; restartCount?: number }>("get_watcher_status");
+export const getObsStatus = () =>
+  invoke<{ status: string; attempt?: number }>("get_obs_status");

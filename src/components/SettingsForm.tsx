@@ -1,22 +1,63 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
-import { Folder, RotateCcw } from "lucide-react";
+import { Folder, Music, RotateCcw, X } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getVersion } from "@tauri-apps/api/app";
 import { getMonitorCount, resetWindow } from "@/lib/commands";
 import { ThemePanel } from "@/components/ThemePanel";
 import { KeybindInput } from "@/components/KeybindInput";
 import { SaveClipCalibration } from "@/components/SaveClipCalibration";
+import { useObsStatus } from "@/hooks/useObsStatus";
+import { errorMessage, toastError } from "@/lib/toast";
 import { allThemes, resolveFlashTheme } from "@/lib/themes";
 import type { AppConfig } from "@/types";
 
 interface SettingsFormProps {
   config: AppConfig;
   onConfigChange: (config: AppConfig) => void;
+}
+
+/** All global-hotkey fields, for duplicate detection. */
+const BIND_FIELDS = [
+  ["g1_bind", "G1"],
+  ["g2_bind", "G2"],
+  ["g3_bind", "G3"],
+  ["rename_bind", "Rename"],
+  ["save_clip_bind", "Save clip"],
+  ["count_up_bind", "Count-up"],
+  ["undo_bind", "Undo"],
+] as const;
+
+type BindField = (typeof BIND_FIELDS)[number][0];
+
+/** Connection pill for the OBS WebSocket section. */
+function ObsStatusPill() {
+  const obs = useObsStatus();
+  const [cls, label] =
+    obs.status === "connected"
+      ? ["bg-green-500/15 text-green-400 border-green-500/40", "Connected"]
+      : obs.status === "connecting"
+        ? ["bg-amber-500/15 text-amber-400 border-amber-500/40", "Connecting..."]
+        : obs.status === "reconnecting"
+          ? [
+              "bg-amber-500/15 text-amber-400 border-amber-500/40",
+              `Reconnecting (attempt ${obs.attempt})...`,
+            ]
+          : obs.status === "disabled"
+            ? ["bg-panel text-t-muted border-t-border", "Off"]
+            : ["bg-red-500/15 text-red-400 border-red-500/40", "Disconnected"];
+  return (
+    <span
+      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-medium ${cls}`}
+    >
+      <span className="h-1.5 w-1.5 rounded-full bg-current" />
+      {label}
+    </span>
+  );
 }
 
 export function SettingsForm({ config, onConfigChange }: SettingsFormProps) {
@@ -27,6 +68,37 @@ export function SettingsForm({ config, onConfigChange }: SettingsFormProps) {
     getVersion().then(setVersion).catch(console.error);
     getMonitorCount().then(setMonitorCount).catch(console.error);
   }, []);
+
+  // Keybind conflict detection: same combo bound to two actions means one of
+  // them silently loses at RegisterHotKey time. Flag it inline.
+  const bindConflicts = useMemo(() => {
+    const byCombo = new Map<string, string[]>();
+    for (const [field, label] of BIND_FIELDS) {
+      const v = (config[field] || "").trim().toLowerCase();
+      if (!v) continue;
+      byCombo.set(v, [...(byCombo.get(v) ?? []), label]);
+    }
+    const conflicts = new Map<BindField, string[]>();
+    for (const [field] of BIND_FIELDS) {
+      const v = (config[field] || "").trim().toLowerCase();
+      if (!v) continue;
+      const users = byCombo.get(v) ?? [];
+      if (users.length > 1) conflicts.set(field, users);
+    }
+    return conflicts;
+  }, [config]);
+
+  const conflictNote = (field: BindField) => {
+    const users = bindConflicts.get(field);
+    if (!users) return null;
+    const own = BIND_FIELDS.find(([f]) => f === field)?.[1];
+    const others = users.filter((u) => u !== own);
+    return (
+      <p className="text-[10px] text-red-400">
+        Same key as {others.join(", ")} — only one of them will work.
+      </p>
+    );
+  };
 
   // Updates the in-memory draft only — persistence happens when the user
   // clicks Save in the parent's button bar. ThemePanel is the one
@@ -177,6 +249,7 @@ export function SettingsForm({ config, onConfigChange }: SettingsFormProps) {
             value={config.save_clip_bind}
             onChange={(v) => update({ save_clip_bind: v })}
           />
+          {conflictNote("save_clip_bind")}
           <p className="text-[10px] text-t-muted">
             Whatever key you press in OBS / ShadowPlay to save a clip. Used as
             a watcher health probe — if no clip arrives within the timeout
@@ -222,6 +295,7 @@ export function SettingsForm({ config, onConfigChange }: SettingsFormProps) {
               value={config[field]}
               onChange={(v) => update({ [field]: v })}
             />
+            {conflictNote(field)}
           </div>
         ))}
         <div className="space-y-1">
@@ -230,6 +304,7 @@ export function SettingsForm({ config, onConfigChange }: SettingsFormProps) {
             value={config.count_up_bind}
             onChange={(v) => update({ count_up_bind: v })}
           />
+          {conflictNote("count_up_bind")}
           <p className="text-[10px] text-t-muted">
             Press once to start counting up from 0. Press again to reset and
             stop. Press again to start over.
@@ -241,6 +316,7 @@ export function SettingsForm({ config, onConfigChange }: SettingsFormProps) {
             value={config.undo_bind}
             onChange={(v) => update({ undo_bind: v })}
           />
+          {conflictNote("undo_bind")}
           <p className="text-[10px] text-t-muted">
             Puts the last clip back where it was (works for mis-pressed
             G-keys and renames). This is a GLOBAL hotkey — avoid Ctrl+Z or it
@@ -305,6 +381,60 @@ export function SettingsForm({ config, onConfigChange }: SettingsFormProps) {
               checked={config[field]}
               onCheckedChange={(v) => update({ [field]: v })}
             />
+          </div>
+        ))}
+        {(
+          [
+            ["clip_save_sound_custom", "Custom clip-save sound"],
+            ["error_sound_custom", "Custom error sound"],
+          ] as const
+        ).map(([field, label]) => (
+          <div key={field} className="space-y-1">
+            <Label className="text-xs">{label}</Label>
+            <div className="flex gap-2 items-center">
+              <Input
+                value={config[field] ?? ""}
+                readOnly
+                placeholder="Default sound"
+                className="text-xs h-8 flex-1"
+              />
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-8 w-8 shrink-0"
+                title="Pick an audio file (wav / mp3 / ogg / flac)"
+                onClick={async () => {
+                  try {
+                    const selected = await open({
+                      filters: [
+                        {
+                          name: "Audio",
+                          extensions: ["wav", "mp3", "ogg", "flac"],
+                        },
+                      ],
+                    });
+                    if (typeof selected === "string") {
+                      update({ [field]: selected });
+                    }
+                  } catch (e) {
+                    toastError(errorMessage(e));
+                  }
+                }}
+              >
+                <Music className="h-4 w-4" />
+              </Button>
+              {config[field] && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 shrink-0"
+                  title="Reset to the default sound"
+                  onClick={() => update({ [field]: null })}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
           </div>
         ))}
         <div className="space-y-1">
@@ -426,7 +556,10 @@ export function SettingsForm({ config, onConfigChange }: SettingsFormProps) {
       <Separator />
 
       <section className="space-y-3">
-        <h3 className="text-sm font-semibold">OBS WebSocket</h3>
+        <div className="flex items-center gap-2">
+          <h3 className="text-sm font-semibold">OBS WebSocket</h3>
+          <ObsStatusPill />
+        </div>
         <div className="flex items-center justify-between">
           <Label className="text-xs">Enabled</Label>
           <Switch

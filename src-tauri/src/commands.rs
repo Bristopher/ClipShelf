@@ -30,9 +30,10 @@ pub fn update_config(
         s.config.obs_websocket_enabled,
         s.config.obs_websocket_password.clone(),
     );
-    s.config.merge_partial(partial);
+    // A merge failure means the update was discarded — error out instead of
+    // saving/emitting as if it succeeded.
+    s.config.merge_partial(partial)?;
     let path = s.config_path.clone();
-    s.config.save_to(&path).map_err(|e| e.to_string())?;
     let config = s.config.clone();
 
     // Repoint the file logger — it captured the videos folder at startup and
@@ -41,7 +42,10 @@ pub fn update_config(
         s.logger
             .reconfigure(&config.videos_folder, config.log_file_enabled);
     }
+    // Write to disk outside the critical section — a G-key press shouldn't
+    // block on file IO behind the state lock.
     drop(s);
+    config.save_to(&path).map_err(|e| e.to_string())?;
 
     // If the videos folder changed (including the first-run case where it
     // was empty at startup and is now set), (re)start the file watcher —
@@ -218,25 +222,45 @@ pub fn do_press_gkey(app: &AppHandle, state: &AppState, key: u8) {
                 LogCategory::System,
             );
             let _ = app.emit("log-entry", &entry);
+            let _ = app.emit(
+                "error",
+                ErrorPayload {
+                    message: format!("Move failed: {}", e),
+                    context: "move".to_string(),
+                },
+            );
         }
     }
 }
 
 #[tauri::command]
-pub fn rename_file(text: String, state: State<'_, AppState>, app: AppHandle) -> Result<(), String> {
+pub async fn rename_file(
+    text: String,
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<(), String> {
+    // The rename retries with sleeps (up to ~1.7s) — keep that off the async
+    // runtime workers, same as the hotkey paths.
+    let st = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || do_rename_file(&app, &st, &text))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+fn do_rename_file(app: &AppHandle, state: &AppState, text: &str) {
     let (file_path, log_enabled) = {
-        let s = state.lock().map_err(|e| e.to_string())?;
+        let Ok(s) = state.lock() else { return };
         let current = match &s.current_file {
             Some(cf) => cf.clone(),
             None => {
                 // Need mutable borrow for logging - drop and re-acquire
                 drop(s);
-                let mut s = state.lock().map_err(|e| e.to_string())?;
+                let Ok(mut s) = state.lock() else { return };
                 let entry = s
                     .logger
                     .log(LogLevel::Error, "No current_file".into(), LogCategory::System);
                 let _ = app.emit("log-entry", &entry);
-                return Ok(());
+                return;
             }
         };
         let file_path = current
@@ -247,9 +271,9 @@ pub fn rename_file(text: String, state: State<'_, AppState>, app: AppHandle) -> 
         (file_path, s.config.log_file_enabled)
     };
 
-    match mover::rename_file_with_text(&file_path, &text) {
+    match mover::rename_file_with_text(&file_path, text) {
         Ok(result) => {
-            let mut s = state.lock().map_err(|e| e.to_string())?;
+            let Ok(mut s) = state.lock() else { return };
             s.current_file = Some(CurrentFile {
                 path: result.new_path.clone(),
                 moved_path: Some(result.new_path.clone()),
@@ -289,22 +313,32 @@ pub fn rename_file(text: String, state: State<'_, AppState>, app: AppHandle) -> 
             }
         }
         Err(e) => {
-            let mut s = state.lock().map_err(|e| e.to_string())?;
+            let Ok(mut s) = state.lock() else { return };
             let entry = s.logger.log(
                 LogLevel::Error,
                 format!("Rename failed: {}", e),
                 LogCategory::System,
             );
             let _ = app.emit("log-entry", &entry);
+            let _ = app.emit(
+                "error",
+                ErrorPayload {
+                    message: format!("Rename failed: {}", e),
+                    context: "rename".to_string(),
+                },
+            );
         }
     }
-    Ok(())
 }
 
 #[tauri::command]
-pub fn undo_last_action(state: State<'_, AppState>, app: AppHandle) -> Result<(), String> {
-    do_undo(&app, state.inner());
-    Ok(())
+pub async fn undo_last_action(state: State<'_, AppState>, app: AppHandle) -> Result<(), String> {
+    // restore_file retries with sleeps — run on the blocking pool, same as
+    // the undo hotkey path in lib.rs.
+    let st = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || do_undo(&app, &st))
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// Reverse the most recent move/rename. Free function so the global undo
@@ -364,6 +398,13 @@ pub fn do_undo(app: &AppHandle, state: &AppState) {
                 LogCategory::System,
             );
             let _ = app.emit("log-entry", &log);
+            let _ = app.emit(
+                "error",
+                ErrorPayload {
+                    message: format!("Undo failed: {}", e),
+                    context: "undo".to_string(),
+                },
+            );
         }
     }
 }
@@ -391,6 +432,9 @@ pub fn set_watch_paused(
     let videos_folder = {
         let mut s = state.lock().map_err(|e| e.to_string())?;
         s.watch_paused = paused;
+        if paused {
+            s.last_watcher_status = "paused".to_string();
+        }
         let msg = if paused {
             "Watching paused — new clips are ignored"
         } else {
@@ -420,6 +464,9 @@ pub fn set_watch_paused(
     } else {
         // Resumed but no folder configured — nothing to start, but the UI
         // still needs to leave the "paused" state.
+        if let Ok(mut s) = state.lock() {
+            s.last_watcher_status = "stopped".to_string();
+        }
         let _ = app.emit(
             "watcher-status",
             WatcherStatusPayload {
@@ -434,6 +481,28 @@ pub fn set_watch_paused(
         let _ = watcher_tx.send(cmd).await;
     });
     Ok(())
+}
+
+/// Current watcher status — fetched by the UI on mount because the status
+/// events usually fire before the webview has loaded its listeners.
+#[tauri::command]
+pub fn get_watcher_status(state: State<'_, AppState>) -> Result<WatcherStatusPayload, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    Ok(WatcherStatusPayload {
+        status: s.last_watcher_status.clone(),
+        restart_count: Some(s.watcher_restart_count),
+        message: None,
+    })
+}
+
+/// Current OBS WebSocket status — same on-mount rationale as above.
+#[tauri::command]
+pub fn get_obs_status(state: State<'_, AppState>) -> Result<ObsWsStatusPayload, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    Ok(ObsWsStatusPayload {
+        status: s.last_obs_status.clone(),
+        attempt: None,
+    })
 }
 
 /// Number of connected monitors — used by the Settings default-position picker.
@@ -467,10 +536,13 @@ pub fn start_user_timer(
     state: State<'_, AppState>,
     channels: State<'_, ChannelState>,
 ) -> Result<(), String> {
-    let duration = duration_secs.unwrap_or_else(|| {
-        let s = state.lock().expect("state lock poisoned");
-        s.config.timer_duration_secs() as u32
-    });
+    let duration = match duration_secs {
+        Some(d) => d,
+        None => {
+            let s = state.lock().map_err(|e| e.to_string())?;
+            s.config.timer_duration_secs() as u32
+        }
+    };
     channels
         .user_timer_tx
         .try_send(TimerCommand::Start { duration_secs: duration })
@@ -486,10 +558,13 @@ pub fn reset_user_timer(
     state: State<'_, AppState>,
     channels: State<'_, ChannelState>,
 ) -> Result<(), String> {
-    let duration = duration_secs.unwrap_or_else(|| {
-        let s = state.lock().expect("state lock poisoned");
-        s.config.timer_duration_secs() as u32
-    });
+    let duration = match duration_secs {
+        Some(d) => d,
+        None => {
+            let s = state.lock().map_err(|e| e.to_string())?;
+            s.config.timer_duration_secs() as u32
+        }
+    };
     channels
         .user_timer_tx
         .try_send(TimerCommand::Reset { duration_secs: duration })

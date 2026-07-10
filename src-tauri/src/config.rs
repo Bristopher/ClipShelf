@@ -265,17 +265,27 @@ impl AppConfig {
     }
 
     /// Saves config to a specific path.
+    ///
+    /// Atomic: writes a sibling temp file then renames it over the real one,
+    /// so a crash or power cut mid-save can never leave a truncated TOML
+    /// (which the next launch would silently replace with defaults, wiping
+    /// every user setting).
     pub fn save_to(&self, path: &Path) -> Result<(), Box<dyn std::error::Error>> {
         let contents = toml::to_string_pretty(self)?;
-        std::fs::write(path, contents)?;
+        let tmp = path.with_extension("toml.tmp");
+        std::fs::write(&tmp, contents)?;
+        std::fs::rename(&tmp, path)?;
         Ok(())
     }
 
     /// Merges a JSON object into the config, updating only the fields present in the JSON.
-    pub fn merge_partial(&mut self, partial: serde_json::Value) {
+    /// Errors (leaving the config unchanged) if the merged result doesn't
+    /// deserialize back into a valid AppConfig — callers must not report a
+    /// successful save when the update was actually discarded.
+    pub fn merge_partial(&mut self, partial: serde_json::Value) -> Result<(), String> {
         let obj = match partial.as_object() {
             Some(o) => o,
-            None => return,
+            None => return Err("partial config update is not a JSON object".to_string()),
         };
 
         // Serialize current config to a JSON Value, apply partial overrides, then deserialize back.
@@ -285,8 +295,12 @@ impl AppConfig {
                 current_obj.insert(k.clone(), v.clone());
             }
         }
-        if let Ok(updated) = serde_json::from_value::<AppConfig>(current) {
-            *self = updated;
+        match serde_json::from_value::<AppConfig>(current) {
+            Ok(updated) => {
+                *self = updated;
+                Ok(())
+            }
+            Err(e) => Err(format!("invalid config update: {}", e)),
         }
     }
 
@@ -420,7 +434,7 @@ timer_duration_ms = 45000
             "obs_websocket_password": "newpass"
         });
 
-        cfg.merge_partial(partial);
+        cfg.merge_partial(partial).expect("merge should succeed");
 
         assert_eq!(cfg.screen_capture_software, "shadowplay");
         assert_eq!(cfg.timer_duration_ms, 90000);
@@ -428,6 +442,17 @@ timer_duration_ms = 45000
         // Untouched fields remain at defaults
         assert_eq!(cfg.g1_bind, "ctrl+F13");
         assert!(cfg.auto_wipe_enabled);
+    }
+
+    #[test]
+    fn test_merge_partial_rejects_bad_types_and_leaves_config_unchanged() {
+        let mut cfg = AppConfig::default();
+        let partial = serde_json::json!({ "timer_duration_ms": "not a number" });
+
+        let result = cfg.merge_partial(partial);
+
+        assert!(result.is_err());
+        assert_eq!(cfg.timer_duration_ms, 70000);
     }
 
     #[test]

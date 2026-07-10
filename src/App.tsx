@@ -12,6 +12,7 @@ import { TimerDisplay } from "@/components/TimerDisplay";
 import { BottomBar } from "@/components/BottomBar";
 import { RenameDialog } from "@/components/RenameDialog";
 import { TitleBar } from "@/components/TitleBar";
+import { Toaster } from "@/components/Toaster";
 import { openFirstRunWindow } from "@/lib/commands";
 import type { AppConfig } from "@/types";
 
@@ -104,22 +105,20 @@ function App() {
 
   const initialSecs = config ? Math.floor(config.timer_duration_ms / 1000) : 70;
   const timer = useTimer(initialSecs);
-  const userTimer = useTimer(initialSecs, {
-    tickEvent: EVENTS.USER_TIMER_TICK,
-    expiredEvent: EVENTS.USER_TIMER_EXPIRED,
-  });
+  // (The old manual "user timer" countdown was never reachable from the UI —
+  // its frontend wiring was removed. The backend actor still exists if a
+  // future feature wants a second countdown.)
 
-  // Flash the whole window each second once either countdown is at 5s or
+  // Flash the whole window each second once the countdown is at 5s or
   // fewer — opt-out via `timer_flash_enabled`. Parity of the remaining-
   // seconds integer drives the toggle (ticks arrive every 1s so the class
   // flips every tick). When on, useTheme swaps to the contrasting/override
   // theme; when off, it reapplies the active theme.
   const flashOn = (() => {
     if (!config?.timer_flash_enabled) return false;
-    const t = timer.running && timer.remainingSecs > 0 && timer.remainingSecs <= 5
-      ? timer.remainingSecs
-      : userTimer.running && userTimer.remainingSecs > 0 && userTimer.remainingSecs <= 5
-        ? userTimer.remainingSecs
+    const t =
+      timer.running && timer.remainingSecs > 0 && timer.remainingSecs <= 5
+        ? timer.remainingSecs
         : 0;
     return t > 0 && t % 2 === 1;
   })();
@@ -146,12 +145,13 @@ function App() {
     >
       <TitleBar />
       <div className="flex flex-1 min-h-0 relative">
-        <Sidebar />
+        <Sidebar config={config} />
         <main className="flex-1 flex flex-col min-w-0">
           <EventLog entries={entries} />
           <BottomBar
             mode={config.disable_file_movesorting ? "rename" : "sort"}
             autoWipe={config.auto_wipe_enabled}
+            obsEnabled={config.obs_websocket_enabled}
             onAutoWipeChange={(v) => updateConfig({ auto_wipe_enabled: v }).then(setConfig)}
             onWipe={clear}
             onRestore={restore}
@@ -179,6 +179,7 @@ function App() {
         )}
       </div>
       <RenameDialog />
+      <Toaster listenBackendErrors />
     </div>
   );
 }

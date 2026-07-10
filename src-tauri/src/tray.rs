@@ -9,6 +9,14 @@ pub struct TrayItems {
     pub pause_item: CheckMenuItem<Wry>,
 }
 
+/// The videos folder from the managed AppState (the live, %APPDATA%-backed
+/// config). Empty string if unset or the lock is unavailable.
+fn live_videos_folder(app: &AppHandle) -> String {
+    app.try_state::<crate::state::AppState>()
+        .and_then(|s| s.lock().ok().map(|s| s.config.videos_folder.clone()))
+        .unwrap_or_default()
+}
+
 pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let pause_item = CheckMenuItem::with_id(
         app,
@@ -38,7 +46,7 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 
     TrayIconBuilder::new()
         .icon(icon)
-        .tooltip("GKey Mover v2.0.1")
+        .tooltip(format!("GKey Mover v{}", env!("CARGO_PKG_VERSION")))
         .menu(&menu)
         .on_menu_event(|app, event| {
             match event.id().as_ref() {
@@ -58,15 +66,19 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                         app.clone(),
                     );
                 }
+                // Read the folder from live state — AppConfig::load() reads
+                // the legacy exe-adjacent path, not the managed %APPDATA%
+                // config, so it returns stale or default (empty) settings.
                 "videos_folder" => {
-                    if let Ok(config) = crate::config::AppConfig::load() {
-                        let _ = opener::open(&config.videos_folder);
+                    let folder = live_videos_folder(app);
+                    if !folder.is_empty() {
+                        let _ = opener::open(&folder);
                     }
                 }
                 "log_folder" => {
-                    if let Ok(config) = crate::config::AppConfig::load() {
-                        let log_path = std::path::PathBuf::from(&config.videos_folder).join("logs");
-                        let _ = opener::open(log_path);
+                    let folder = live_videos_folder(app);
+                    if !folder.is_empty() {
+                        let _ = opener::open(std::path::PathBuf::from(&folder).join("logs"));
                     }
                 }
                 "help" => {

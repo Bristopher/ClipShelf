@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { revealInExplorer, openFolder } from "@/lib/commands";
+import { errorMessage, toastError } from "@/lib/toast";
 import type { LogEntry } from "@/types";
 
 function categoryColor(category: string, level: string): string {
@@ -9,6 +10,7 @@ function categoryColor(category: string, level: string): string {
   if (category === "file-created") return "text-green-400";
   if (category === "file-moved" || category === "file-renamed") return "text-purple-400";
   if (category === "watcher" || category === "obs") return "text-yellow-400";
+  if (level === "success") return "text-green-400";
   return "text-muted-foreground";
 }
 
@@ -28,9 +30,23 @@ export function EventLog({ entries }: EventLogProps) {
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
   const [ctrlHeld, setCtrlHeld] = useState(false);
   const hoverTimer = useRef<number | null>(null);
+  // Only auto-scroll while the user is already at (or near) the bottom —
+  // a new entry shouldn't yank them down mid-read of an older one.
+  // onScrollCapture because scroll events don't bubble out of the
+  // ScrollArea viewport.
+  const nearBottomRef = useRef(true);
+
+  const handleScrollCapture = (e: React.UIEvent<HTMLDivElement>) => {
+    const el = e.target as HTMLElement;
+    if (!el || typeof el.scrollHeight !== "number") return;
+    nearBottomRef.current =
+      el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+  };
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (nearBottomRef.current) {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
   }, [entries]);
 
   // Track Ctrl while a clickable entry is hovered so the tooltip highlights
@@ -69,14 +85,14 @@ export function EventLog({ entries }: EventLogProps) {
     if (e.ctrlKey) {
       // openFolder is opener::open — for a file path that means the
       // default video player.
-      openFolder(entry.path).catch(console.error);
+      openFolder(entry.path).catch((err) => toastError(errorMessage(err)));
     } else {
-      revealInExplorer(entry.path).catch(console.error);
+      revealInExplorer(entry.path).catch((err) => toastError(errorMessage(err)));
     }
   };
 
   return (
-    <ScrollArea className="flex-1 px-3 py-2">
+    <ScrollArea className="flex-1 px-3 py-2" onScrollCapture={handleScrollCapture}>
       {entries.length === 0 ? (
         <p className="text-sm text-muted-foreground italic pt-4 text-center">
           Waiting for events...
