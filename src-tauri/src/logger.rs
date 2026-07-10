@@ -137,10 +137,14 @@ impl AppLogger {
         self.display_buffer.clone()
     }
 
+    /// Test-only inspection accessors — production reads go through
+    /// restore_display / the emitted events.
+    #[cfg(test)]
     pub fn display_entries(&self) -> &[LogEntryPayload] {
         &self.display_buffer
     }
 
+    #[cfg(test)]
     pub fn history(&self) -> &[LogEntryPayload] {
         &self.history
     }
@@ -235,7 +239,7 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let videos_folder = tmp.path().to_str().unwrap();
 
-        let mut logger = AppLogger {
+        let logger = AppLogger {
             history: Vec::new(),
             display_buffer: Vec::new(),
             log_dir: Some(PathBuf::from(videos_folder).join("logs")),

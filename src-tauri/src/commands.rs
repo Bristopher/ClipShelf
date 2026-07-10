@@ -192,7 +192,6 @@ fn move_file_with_key(
             s.current_file = Some(CurrentFile {
                 path: result.new_path.clone(),
                 moved_path: None,
-                renamed: false,
             });
             s.record_gkey_move(key, result.new_path.clone());
             let mode = if config.disable_file_movesorting {
@@ -345,7 +344,6 @@ pub fn select_dropped_file(
     s.current_file = Some(CurrentFile {
         path: file_path.clone(),
         moved_path: None,
-        renamed: false,
     });
     s.bind_chosen = None;
     let entry = s.logger.log_with_path(
@@ -465,7 +463,6 @@ fn do_rename_file(app: &AppHandle, state: &AppState, text: &str) {
             s.current_file = Some(CurrentFile {
                 path: result.new_path.clone(),
                 moved_path: Some(result.new_path.clone()),
-                renamed: true,
             });
             s.push_undo(crate::state::UndoEntry {
                 moves: vec![crate::state::UndoMove {
@@ -570,7 +567,6 @@ pub fn do_undo(app: &AppHandle, state: &AppState) {
                 s.current_file = Some(CurrentFile {
                     path: restored.clone(),
                     moved_path: None,
-                    renamed: false,
                 });
                 let undone_name = mv
                     .to

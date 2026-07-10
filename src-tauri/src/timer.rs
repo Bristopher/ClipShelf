@@ -13,7 +13,6 @@ pub enum CountUpCommand {
 
 pub enum TimerCommand {
     Start { duration_secs: u32 },
-    Stop,
     Reset { duration_secs: u32 },
 }
 
@@ -55,9 +54,6 @@ pub fn spawn_timer(
                                 remaining_secs: remaining,
                                 total_secs,
                             });
-                        }
-                        Some(TimerCommand::Stop) => {
-                            running = false;
                         }
                         Some(TimerCommand::Reset { duration_secs }) => {
                             total_secs = duration_secs;

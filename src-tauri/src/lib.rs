@@ -178,7 +178,6 @@ pub fn run() {
 
             // Create ChannelState
             let channel_state = ChannelState {
-                timer_tx: timer_tx.clone(),
                 user_timer_tx: user_timer_tx.clone(),
                 watcher_tx: watcher_tx.clone(),
                 count_up_tx: count_up_tx.clone(),
@@ -687,7 +686,6 @@ async fn handle_file_created(
         s.current_file = Some(CurrentFile {
             path: path.clone(),
             moved_path: None,
-            renamed: false,
         });
         s.bind_chosen = None;
         // (last_created_path / last_file_created_at were already recorded in

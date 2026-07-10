@@ -326,6 +326,20 @@ async fn connect_and_run(
                     Some(f) => (Some(u16::from(f.code)), f.reason.to_string()),
                     None => (None, "connection closed".to_string()),
                 };
+                // OBS closes with 4009 when authentication fails — a
+                // user-fixable problem that deserves its own event (lib.rs
+                // routes it to the visible error surface, not just the log).
+                if code == Some(4009) {
+                    let _ = event_tx
+                        .send(ObsWsEvent::AuthError {
+                            message: if reason.is_empty() {
+                                "wrong password (OBS close code 4009)".to_string()
+                            } else {
+                                reason.clone()
+                            },
+                        })
+                        .await;
+                }
                 let _ = event_tx
                     .send(ObsWsEvent::Disconnected { code, reason })
                     .await;

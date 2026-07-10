@@ -254,12 +254,6 @@ impl AppConfig {
             .join("gkey_config.toml")
     }
 
-    /// Loads config from the default path next to the executable.
-    /// Returns defaults if the file does not exist.
-    pub fn load() -> Result<Self, Box<dyn std::error::Error>> {
-        Self::load_from(&Self::config_path())
-    }
-
     /// Loads config from a specific path. Returns defaults if file doesn't exist.
     pub fn load_from(path: &Path) -> Result<Self, Box<dyn std::error::Error>> {
         if !path.exists() {
@@ -268,11 +262,6 @@ impl AppConfig {
         let contents = std::fs::read_to_string(path)?;
         let config: Self = toml::from_str(&contents)?;
         Ok(config)
-    }
-
-    /// Saves config to the default path next to the executable.
-    pub fn save(&self) -> Result<(), Box<dyn std::error::Error>> {
-        self.save_to(&Self::config_path())
     }
 
     /// Saves config to a specific path.
@@ -320,7 +309,10 @@ impl AppConfig {
         self.timer_duration_ms / 1000
     }
 
-    /// Returns timer duration formatted as "MM:SS".
+    /// Returns timer duration formatted as "MM:SS". (Currently only tests
+    /// use it — cfg(test) rather than deleted because it documents the
+    /// duration format.)
+    #[cfg(test)]
     pub fn timer_display(&self) -> String {
         let total_secs = self.timer_duration_secs();
         let mins = total_secs / 60;

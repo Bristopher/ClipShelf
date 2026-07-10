@@ -57,12 +57,6 @@ pub fn play_move_beep(resource_dir: &Path) {
     play_sound(&path);
 }
 
-/// Play the low error beep
-pub fn play_error_beep(resource_dir: &Path) {
-    let path = resource_dir.join("sounds").join("audiocheck.net_sin_150Hz_-21dBFS_.75s.wav");
-    play_sound(&path);
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

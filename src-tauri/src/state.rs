@@ -13,7 +13,6 @@ use crate::watcher::WatcherCommand;
 pub struct CurrentFile {
     pub path: PathBuf,
     pub moved_path: Option<PathBuf>,
-    pub renamed: bool,
 }
 
 /// One file's reversible move: `from` is where the file was, `to` is where
@@ -149,9 +148,10 @@ impl AppStateInner {
 
 pub type AppState = Arc<Mutex<AppStateInner>>;
 
-/// Holds the tokio channel senders for background tasks.
+/// Holds the tokio channel senders for background tasks. (The auto-wipe
+/// timer's sender isn't here — no command needs it; the lib.rs event
+/// handlers hold their own clones.)
 pub struct ChannelState {
-    pub timer_tx: mpsc::Sender<TimerCommand>,
     pub user_timer_tx: mpsc::Sender<TimerCommand>,
     pub watcher_tx: mpsc::Sender<WatcherCommand>,
     pub count_up_tx: mpsc::Sender<CountUpCommand>,
