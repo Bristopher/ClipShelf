@@ -16,12 +16,20 @@ pub struct CurrentFile {
     pub renamed: bool,
 }
 
-/// One reversible move/rename: `from` is where the file was, `to` is where
+/// One file's reversible move: `from` is where the file was, `to` is where
 /// it ended up. Undo renames `to` back to `from`.
 #[derive(Debug, Clone)]
-pub struct UndoEntry {
+pub struct UndoMove {
     pub from: PathBuf,
     pub to: PathBuf,
+}
+
+/// One undoable ACTION — a single move/rename, or a whole multi-file batch
+/// drop. One undo press reverses the entire action (moves restored in
+/// reverse order).
+#[derive(Debug, Clone)]
+pub struct UndoEntry {
+    pub moves: Vec<UndoMove>,
 }
 
 /// Cap on the undo history — enough for a whole session of mis-presses

@@ -164,14 +164,20 @@ pub fn do_press_gkey(app: &AppHandle, state: &AppState, key: u8) {
     let config = s.config.clone();
     drop(s); // Release lock before file operations
 
-    move_file_with_key(app, state, &file_path, key, &gkey_label, &config);
+    if let Some(mv) = move_file_with_key(app, state, &file_path, key, &gkey_label, &config) {
+        if let Ok(mut s) = state.lock() {
+            s.push_undo(crate::state::UndoEntry { moves: vec![mv] });
+        }
+    }
 }
 
 /// Shared move handling for a G-key action: the collision-safe move itself,
-/// then state/current-file/undo/stats bookkeeping, log + events, sound.
+/// then state/current-file/stats bookkeeping, log + events, sound.
 /// Used by key presses (current clip) and drag-drops (explicit path).
 /// Blocking (retry sleeps) — callers run it off the async workers.
-/// Returns whether the move succeeded (batch drops count outcomes).
+/// Returns the performed move on success so the CALLER records undo — a
+/// single press pushes one entry, a batch drop groups all its moves into
+/// one entry so one undo press reverses the whole drop.
 fn move_file_with_key(
     app: &AppHandle,
     state: &AppState,
@@ -179,18 +185,14 @@ fn move_file_with_key(
     key: u8,
     log_label: &str,
     config: &AppConfig,
-) -> bool {
+) -> Option<crate::state::UndoMove> {
     match mover::move_or_rename_file(file_path, key, config) {
         Ok(result) => {
-            let Ok(mut s) = state.lock() else { return false };
+            let Ok(mut s) = state.lock() else { return None };
             s.current_file = Some(CurrentFile {
                 path: result.new_path.clone(),
                 moved_path: None,
                 renamed: false,
-            });
-            s.push_undo(crate::state::UndoEntry {
-                from: result.original_path.clone(),
-                to: result.new_path.clone(),
             });
             s.record_gkey_move(key, result.new_path.clone());
             let mode = if config.disable_file_movesorting {
@@ -232,10 +234,13 @@ fn move_file_with_key(
                 let resource_dir = app.path().resource_dir().unwrap_or_default();
                 sound::play_move_beep(&resource_dir);
             }
-            true
+            Some(crate::state::UndoMove {
+                from: result.original_path,
+                to: result.new_path,
+            })
         }
         Err(e) => {
-            let Ok(mut s) = state.lock() else { return false };
+            let Ok(mut s) = state.lock() else { return None };
             let entry = s.logger.log(
                 LogLevel::Error,
                 format!("Move failed: {}", e),
@@ -249,7 +254,7 @@ fn move_file_with_key(
                     context: "move".to_string(),
                 },
             );
-            false
+            None
         }
     }
 }
@@ -289,7 +294,7 @@ pub async fn drop_files_to_gkey(
             s.config.clone()
         };
         let label = format!("G{} (drop)", key);
-        let mut moved = 0u32;
+        let mut moves: Vec<crate::state::UndoMove> = Vec::new();
         let mut failed = 0u32;
         for path in &paths {
             let file_path = std::path::PathBuf::from(path);
@@ -297,10 +302,17 @@ pub async fn drop_files_to_gkey(
                 failed += 1;
                 continue;
             }
-            if move_file_with_key(&app, &st, &file_path, key, &label, &config) {
-                moved += 1;
-            } else {
-                failed += 1;
+            match move_file_with_key(&app, &st, &file_path, key, &label, &config) {
+                Some(mv) => moves.push(mv),
+                None => failed += 1,
+            }
+        }
+        let moved = moves.len() as u32;
+        // The whole drop is ONE undoable action — a single undo press
+        // restores every file it moved.
+        if !moves.is_empty() {
+            if let Ok(mut s) = st.lock() {
+                s.push_undo(crate::state::UndoEntry { moves });
             }
         }
         BatchDropResult { moved, failed }
@@ -456,8 +468,10 @@ fn do_rename_file(app: &AppHandle, state: &AppState, text: &str) {
                 renamed: true,
             });
             s.push_undo(crate::state::UndoEntry {
-                from: result.original_path.clone(),
-                to: result.new_path.clone(),
+                moves: vec![crate::state::UndoMove {
+                    from: result.original_path.clone(),
+                    to: result.new_path.clone(),
+                }],
             });
             let new_name = result
                 .new_path
@@ -527,8 +541,9 @@ pub async fn undo_last_action(state: State<'_, AppState>, app: AppHandle) -> Res
         .map_err(|e| e.to_string())
 }
 
-/// Reverse the most recent move/rename. Free function so the global undo
-/// hotkey can call it directly in Rust, same as do_press_gkey.
+/// Reverse the most recent action (a single move/rename, or every file of a
+/// batch drop — restored in reverse order). Free function so the global
+/// undo hotkey can call it directly in Rust, same as do_press_gkey.
 pub fn do_undo(app: &AppHandle, state: &AppState) {
     let popped = {
         let Ok(mut s) = state.lock() else { return };
@@ -545,53 +560,71 @@ pub fn do_undo(app: &AppHandle, state: &AppState) {
         return;
     };
 
-    match mover::restore_file(&entry.to, &entry.from) {
-        Ok(restored) => {
-            let Ok(mut s) = state.lock() else { return };
-            s.current_file = Some(CurrentFile {
-                path: restored.clone(),
-                moved_path: None,
-                renamed: false,
-            });
-            let undone_name = entry
-                .to
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("?")
-                .to_string();
-            let restored_name = restored
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("?")
-                .to_string();
-            let log = s.logger.log_with_path(
-                LogLevel::Success,
-                format!("Undo: {} → {}", undone_name, restored_name),
-                LogCategory::FileMoved,
-                Some(restored.to_string_lossy().to_string()),
-            );
-            let _ = app.emit("log-entry", &log);
-            if s.config.log_file_enabled {
-                s.logger
-                    .write_to_file(&format!("Undo: {} ---------> {}", undone_name, restored_name));
+    let total = entry.moves.len();
+    let mut restored_count = 0usize;
+    for mv in entry.moves.iter().rev() {
+        match mover::restore_file(&mv.to, &mv.from) {
+            Ok(restored) => {
+                restored_count += 1;
+                let Ok(mut s) = state.lock() else { return };
+                s.current_file = Some(CurrentFile {
+                    path: restored.clone(),
+                    moved_path: None,
+                    renamed: false,
+                });
+                let undone_name = mv
+                    .to
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("?")
+                    .to_string();
+                let restored_name = restored
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("?")
+                    .to_string();
+                let log = s.logger.log_with_path(
+                    LogLevel::Success,
+                    format!("Undo: {} → {}", undone_name, restored_name),
+                    LogCategory::FileMoved,
+                    Some(restored.to_string_lossy().to_string()),
+                );
+                let _ = app.emit("log-entry", &log);
+                if s.config.log_file_enabled {
+                    s.logger.write_to_file(&format!(
+                        "Undo: {} ---------> {}",
+                        undone_name, restored_name
+                    ));
+                }
+            }
+            Err(e) => {
+                let Ok(mut s) = state.lock() else { return };
+                let log = s.logger.log(
+                    LogLevel::Error,
+                    format!("Undo failed: {}", e),
+                    LogCategory::System,
+                );
+                let _ = app.emit("log-entry", &log);
+                let _ = app.emit(
+                    "error",
+                    ErrorPayload {
+                        message: format!("Undo failed: {}", e),
+                        context: "undo".to_string(),
+                    },
+                );
             }
         }
-        Err(e) => {
-            let Ok(mut s) = state.lock() else { return };
-            let log = s.logger.log(
-                LogLevel::Error,
-                format!("Undo failed: {}", e),
-                LogCategory::System,
-            );
-            let _ = app.emit("log-entry", &log);
-            let _ = app.emit(
-                "error",
-                ErrorPayload {
-                    message: format!("Undo failed: {}", e),
-                    context: "undo".to_string(),
-                },
-            );
-        }
+    }
+
+    // Batch summary so the user sees one line for the whole action.
+    if total > 1 {
+        let Ok(mut s) = state.lock() else { return };
+        let log = s.logger.log(
+            LogLevel::Info,
+            format!("Undo batch: restored {}/{} files", restored_count, total),
+            LogCategory::System,
+        );
+        let _ = app.emit("log-entry", &log);
     }
 }
 
