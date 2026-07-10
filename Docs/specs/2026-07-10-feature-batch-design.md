@@ -134,5 +134,13 @@ users get confused.)
   mapped to "Authentication failed". Test button + inline result in the
   setup window's OBS section.
 
+- **Batch undo-as-one**: `UndoEntry` is now a Vec of `UndoMove`s — one
+  undoable ACTION. Key presses and renames push single-move entries; a
+  multi-file drop pushes ONE grouped entry, so one undo press restores the
+  whole drop (files restored in reverse order, per-file logs + a
+  "restored n/m" summary line; failures log/emit individually and don't
+  abort the rest). `move_file_with_key` returns the performed move instead
+  of pushing undo itself — grouping is the caller's decision.
+
 Still deferred: flyout thumbnails (dependency-heavy), `{n}` counter token
-(semantics undecided).
+(semantics undecided), weekly/all-time stats.

@@ -31,6 +31,8 @@ haven't done it.
       count badge appears on the button, move sound if enabled)
 - [ ] Drop SEVERAL videos on G2 → all of them move; "Sorted N clips" toast;
       if one was locked/missing → "N couldn't be moved" toast + log entries
+- [ ] After a multi-file drop, ONE undo (button or hotkey) restores ALL of
+      them — per-file "Undo:" log lines + "Undo batch: restored n/m" summary
 - [ ] Drop on the log (or G4) → rename dialog opens with that file's name;
       renaming works; the file also became the "current clip" (multi-drop
       here uses the first video, info toast says so)
