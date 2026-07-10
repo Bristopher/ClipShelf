@@ -22,7 +22,12 @@ function splitName(filename: string): { stem: string; ext: string } {
   return { stem: filename.slice(0, dot), ext: filename.slice(dot) };
 }
 
-export function RenameDialog() {
+interface RenameDialogProps {
+  /** Recently used rename texts (backend-maintained), shown as chips. */
+  mru: string[];
+}
+
+export function RenameDialog({ mru }: RenameDialogProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [currentFilename, setCurrentFilename] = useState("");
   const [text, setText] = useState("");
@@ -43,15 +48,23 @@ export function RenameDialog() {
 
   // Open dialog when hotkey-triggered with key=4. The backend APPENDS the
   // text (" - {text}") to the existing name, so the input starts empty and
-  // the preview line below shows the resulting filename live.
+  // the preview line below shows the resulting filename live. Drag-drops
+  // include the filename directly (no file-created event fired for them).
   useEffect(() => {
-    const unlisten = listen<{ key: number }>(EVENTS.HOTKEY_TRIGGERED, (event) => {
-      if (event.payload.key === 4) {
-        setText("");
-        setIsOpen(true);
-        requestAnimationFrame(() => inputRef.current?.focus());
-      }
-    });
+    const unlisten = listen<{ key: number; filename?: string }>(
+      EVENTS.HOTKEY_TRIGGERED,
+      (event) => {
+        if (event.payload.key === 4) {
+          if (event.payload.filename) {
+            setCurrentFilename(event.payload.filename);
+            filenameRef.current = event.payload.filename;
+          }
+          setText("");
+          setIsOpen(true);
+          requestAnimationFrame(() => inputRef.current?.focus());
+        }
+      },
+    );
     return () => {
       unlisten.then((fn) => fn());
     };
@@ -106,6 +119,23 @@ export function RenameDialog() {
             → {preview}
           </p>
         ) : null}
+        {mru.length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {mru.map((t) => (
+              <button
+                key={t}
+                onClick={() => {
+                  setText(t);
+                  inputRef.current?.focus();
+                }}
+                title={`Use "${t}"`}
+                className="px-1.5 py-0.5 rounded border border-border text-[10px] text-muted-foreground hover:text-foreground hover:bg-hover max-w-40 truncate"
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+        )}
         <DialogFooter>
           <Button variant="ghost" size="sm" onClick={() => setIsOpen(false)}>
             Cancel

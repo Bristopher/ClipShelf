@@ -94,3 +94,33 @@ pub struct ErrorPayload {
     pub message: String,
     pub context: String,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecentClipPayload {
+    pub name: String,
+    pub path: String,
+}
+
+/// Session move stats for one G-key (sidebar badge + recent-clips flyout).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GKeyStatPayload {
+    pub key: u8,
+    pub count: u32,
+    pub recent: Vec<RecentClipPayload>,
+}
+
+/// Snapshot for the diagnostics popover. Fetched on open — no polling.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagnosticsPayload {
+    pub version: String,
+    pub config_path: String,
+    pub videos_folder: String,
+    pub watcher_status: String,
+    pub watcher_restart_count: u32,
+    pub watch_paused: bool,
+    pub obs_enabled: bool,
+    pub obs_status: String,
+}

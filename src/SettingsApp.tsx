@@ -69,7 +69,12 @@ export function SettingsApp() {
   const handleSave = async () => {
     if (!draft) return;
     try {
-      const updated = await updateConfig(draft);
+      // The backend appends to rename_mru on every rename — never send the
+      // draft's (possibly stale) copy or a save here would clobber entries
+      // added while this window sat open. updateConfig merges partially, so
+      // omitting the field keeps the backend value.
+      const { rename_mru: _mru, ...payload } = draft;
+      const updated = await updateConfig(payload);
       setSaved(updated);
       setDraft(updated);
       toastSuccess("Settings saved");

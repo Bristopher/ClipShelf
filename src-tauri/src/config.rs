@@ -42,6 +42,10 @@ fn default_autostart_enabled() -> bool { false }
 fn default_remember_window_layout() -> bool { true }
 fn default_monitor() -> u32 { 2 }
 fn default_anchor() -> String { "top-left".to_string() }
+fn default_rename_mru() -> Vec<String> { Vec::new() }
+
+/// Max entries kept in the rename most-recently-used list.
+pub const RENAME_MRU_MAX: usize = 8;
 
 // --- AppConfig struct ---
 
@@ -188,6 +192,12 @@ pub struct AppConfig {
     /// "bottom-left", "bottom-right", or "center".
     #[serde(default = "default_anchor")]
     pub default_anchor: String,
+
+    /// Most-recently-used rename texts, newest first (cap RENAME_MRU_MAX).
+    /// Maintained by the backend on every successful rename; the rename
+    /// dialog shows these as one-click chips.
+    #[serde(default = "default_rename_mru")]
+    pub rename_mru: Vec<String>,
 }
 
 impl Default for AppConfig {
@@ -230,6 +240,7 @@ impl Default for AppConfig {
             remember_window_layout: default_remember_window_layout(),
             default_monitor: default_monitor(),
             default_anchor: default_anchor(),
+            rename_mru: default_rename_mru(),
         }
     }
 }
@@ -315,6 +326,15 @@ impl AppConfig {
         let mins = total_secs / 60;
         let secs = total_secs % 60;
         format!("{:02}:{:02}", mins, secs)
+    }
+
+    /// Record a rename text in the MRU list: newest first, case-insensitive
+    /// dedupe, capped at RENAME_MRU_MAX.
+    pub fn push_rename_mru(&mut self, text: &str) {
+        let lower = text.to_lowercase();
+        self.rename_mru.retain(|t| t.to_lowercase() != lower);
+        self.rename_mru.insert(0, text.to_string());
+        self.rename_mru.truncate(RENAME_MRU_MAX);
     }
 
     /// Returns the sort folder path for a given G-key number (1, 2, or 3).
@@ -453,6 +473,25 @@ timer_duration_ms = 45000
 
         assert!(result.is_err());
         assert_eq!(cfg.timer_duration_ms, 70000);
+    }
+
+    #[test]
+    fn test_push_rename_mru_dedupes_and_caps() {
+        let mut cfg = AppConfig::default();
+        assert!(cfg.rename_mru.is_empty());
+
+        cfg.push_rename_mru("clutch");
+        cfg.push_rename_mru("ace");
+        // Case-insensitive dedupe: re-adding moves it to the front with the
+        // newest casing.
+        cfg.push_rename_mru("Clutch");
+        assert_eq!(cfg.rename_mru, vec!["Clutch", "ace"]);
+
+        for i in 0..10 {
+            cfg.push_rename_mru(&format!("entry{}", i));
+        }
+        assert_eq!(cfg.rename_mru.len(), RENAME_MRU_MAX);
+        assert_eq!(cfg.rename_mru[0], "entry9");
     }
 
     #[test]

@@ -5,6 +5,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { KeybindInput } from "@/components/KeybindInput";
 import { Folder, Sparkles } from "lucide-react";
 import { getConfig, updateConfig } from "@/lib/commands";
@@ -25,6 +26,8 @@ export function FirstRunApp() {
   const [g3, setG3] = useState("");
   const [renameBind, setRenameBind] = useState("");
   const [saveClipBind, setSaveClipBind] = useState("");
+  const [obsEnabled, setObsEnabled] = useState(false);
+  const [obsPassword, setObsPassword] = useState("");
   const [saving, setSaving] = useState(false);
   useTheme(config, null);
 
@@ -37,6 +40,8 @@ export function FirstRunApp() {
       setG3(cfg.g3_bind);
       setRenameBind(cfg.rename_bind);
       setSaveClipBind(cfg.save_clip_bind);
+      setObsEnabled(cfg.obs_websocket_enabled);
+      setObsPassword(cfg.obs_websocket_password);
     });
     refreshSystemMode().catch(() => {});
   }, []);
@@ -66,6 +71,8 @@ export function FirstRunApp() {
         g3_bind: g3,
         rename_bind: renameBind,
         save_clip_bind: saveClipBind,
+        obs_websocket_enabled: obsEnabled,
+        obs_websocket_password: obsPassword,
       });
       await getCurrentWindow().hide();
     } catch (e) {
@@ -159,6 +166,39 @@ export function FirstRunApp() {
             <KeyRow label="G3" value={g3} onChange={setG3} />
             <KeyRow label="Rename" value={renameBind} onChange={setRenameBind} />
           </div>
+        </div>
+
+        <div className="space-y-2 pt-2 border-t border-t-border">
+          <div className="flex items-center justify-between">
+            <Label className="text-xs font-semibold">
+              OBS WebSocket <span className="font-normal text-t-muted">(optional)</span>
+            </Label>
+            <Switch
+              checked={obsEnabled}
+              onCheckedChange={setObsEnabled}
+              className="scale-75"
+            />
+          </div>
+          <p className="text-[10px] text-t-muted">
+            Lets OBS tell GKey Mover the exact saved clip instantly — faster
+            and more reliable than folder watching alone. Find the password in
+            OBS under Tools → WebSocket Server Settings.
+          </p>
+          {obsEnabled && (
+            <>
+              <Input
+                type="password"
+                value={obsPassword}
+                onChange={(e) => setObsPassword(e.target.value)}
+                placeholder="WebSocket server password"
+                className="text-xs h-8"
+              />
+              <p className="text-[10px] text-t-muted">
+                Connection status shows in the main window (OBS dot) right
+                after setup.
+              </p>
+            </>
+          )}
         </div>
 
         <div className="pt-2 flex justify-end">

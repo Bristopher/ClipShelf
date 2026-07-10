@@ -1,20 +1,33 @@
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { Pause, Play, Timer as TimerIcon, TriangleAlert, Undo2 } from "lucide-react";
+import {
+  Activity,
+  Pause,
+  Play,
+  RotateCw,
+  Timer as TimerIcon,
+  TriangleAlert,
+  Undo2,
+} from "lucide-react";
 import {
   wipeLog,
   restoreLog,
   toggleCountUp,
   undoLastAction,
   setWatchPaused,
+  getDiagnostics,
+  restartWatcher,
+  openFolder,
+  revealInExplorer,
 } from "@/lib/commands";
 import { useCountUp } from "@/hooks/useCountUp";
 import { useWatcherStatus } from "@/hooks/useWatcherStatus";
 import { useObsStatus } from "@/hooks/useObsStatus";
-import { errorMessage, toastError } from "@/lib/toast";
-import type { LogEntry } from "@/types";
+import { errorMessage, toastError, toastInfo } from "@/lib/toast";
+import type { Diagnostics, LogEntry } from "@/types";
 
 interface BottomBarProps {
   mode: "rename" | "sort";
@@ -193,6 +206,177 @@ export function BottomBar({
           Auto-Wipe
         </Label>
       </div>
+
+      <div className="flex-1" />
+
+      <DiagnosticsButton />
+    </div>
+  );
+}
+
+/** Row in the diagnostics popover — value clickable when onClick is set. */
+function DiagRow({
+  label,
+  value,
+  title,
+  onClick,
+}: {
+  label: string;
+  value: string;
+  title?: string;
+  onClick?: () => void;
+}) {
+  return (
+    <div className="flex gap-2 items-baseline">
+      <span className="text-[10px] text-t-muted w-20 shrink-0">{label}</span>
+      {onClick ? (
+        <button
+          onClick={onClick}
+          title={title}
+          className="text-[10px] text-t-text truncate hover:underline underline-offset-2 text-left min-w-0"
+        >
+          {value}
+        </button>
+      ) : (
+        <span className="text-[10px] text-t-text truncate min-w-0" title={title}>
+          {value}
+        </span>
+      )}
+    </div>
+  );
+}
+
+const SHORTCUTS: [string, string][] = [
+  ["Del", "Wipe log"],
+  ["Ctrl+Z", "Undo last move/rename"],
+  ["Ctrl+F", "Filter log"],
+  ["Ctrl+,", "Open Settings"],
+];
+
+/**
+ * Diagnostics popover: watcher/OBS state, config + folder paths, a Restart
+ * Watcher button, and the in-app shortcut cheat sheet. Snapshot fetched on
+ * open — no polling.
+ */
+function DiagnosticsButton() {
+  const [open, setOpen] = useState(false);
+  const [diag, setDiag] = useState<Diagnostics | null>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    getDiagnostics()
+      .then(setDiag)
+      .catch((e) => toastError(errorMessage(e)));
+    const onDown = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const handleRestart = () => {
+    restartWatcher()
+      .then(() => {
+        toastInfo("Watcher restart requested");
+        // Refresh the snapshot after the restart settles.
+        window.setTimeout(() => {
+          getDiagnostics().then(setDiag).catch(() => {});
+        }, 500);
+      })
+      .catch((e) => toastError(errorMessage(e)));
+  };
+
+  const watcherLabel = diag
+    ? diag.watchPaused
+      ? "paused"
+      : diag.watcherStatus +
+        (diag.watcherRestartCount > 0 ? ` (restarted ${diag.watcherRestartCount}×)` : "")
+    : "";
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-7 w-7"
+        title="Diagnostics"
+        aria-label="Diagnostics"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <Activity className="h-3.5 w-3.5" />
+      </Button>
+      {open && (
+        <div className="absolute bottom-full right-0 mb-2 z-50 w-72 rounded-md border border-t-border bg-panel shadow-lg p-3 space-y-2 animate-in fade-in-0 zoom-in-95 duration-150">
+          <div className="flex items-center justify-between">
+            <p className="text-[11px] font-semibold text-t-text">Diagnostics</p>
+            {diag && <span className="text-[10px] text-t-muted">v{diag.version}</span>}
+          </div>
+          {diag ? (
+            <>
+              <div className="space-y-1">
+                <DiagRow label="Watcher" value={watcherLabel} />
+                <DiagRow
+                  label="OBS WS"
+                  value={diag.obsEnabled ? diag.obsStatus : "disabled"}
+                />
+                <DiagRow
+                  label="Clips folder"
+                  value={diag.videosFolder || "(not set)"}
+                  title={diag.videosFolder ? `Open\n${diag.videosFolder}` : undefined}
+                  onClick={
+                    diag.videosFolder
+                      ? () =>
+                          openFolder(diag.videosFolder).catch((e) =>
+                            toastError(errorMessage(e)),
+                          )
+                      : undefined
+                  }
+                />
+                <DiagRow
+                  label="Config"
+                  value={diag.configPath}
+                  title={`Reveal in Explorer\n${diag.configPath}`}
+                  onClick={() =>
+                    revealInExplorer(diag.configPath).catch((e) =>
+                      toastError(errorMessage(e)),
+                    )
+                  }
+                />
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-6 text-[10px] gap-1 w-full"
+                onClick={handleRestart}
+              >
+                <RotateCw className="h-3 w-3" />
+                Restart watcher
+              </Button>
+            </>
+          ) : (
+            <p className="text-[10px] text-t-muted">Loading...</p>
+          )}
+          <div className="pt-1 border-t border-t-border space-y-0.5">
+            <p className="text-[10px] font-semibold text-t-muted">Shortcuts</p>
+            {SHORTCUTS.map(([key, what]) => (
+              <div key={key} className="flex gap-2 text-[10px]">
+                <span className="font-mono text-t-text w-12 shrink-0">{key}</span>
+                <span className="text-t-muted">{what}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

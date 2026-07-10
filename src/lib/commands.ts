@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AppConfig, LogEntry, Theme } from "../types";
+import type { AppConfig, Diagnostics, GKeyStat, LogEntry, Theme } from "../types";
 
 export const getConfig = () => invoke<AppConfig>("get_config");
 export const updateConfig = (partial: Partial<AppConfig>) => invoke<AppConfig>("update_config", { partial });
@@ -31,3 +31,9 @@ export const getWatcherStatus = () =>
   invoke<{ status: string; restartCount?: number }>("get_watcher_status");
 export const getObsStatus = () =>
   invoke<{ status: string; attempt?: number }>("get_obs_status");
+export const dropFileToGkey = (path: string, key: number) =>
+  invoke<void>("drop_file_to_gkey", { path, key });
+export const selectDroppedFile = (path: string) =>
+  invoke<string>("select_dropped_file", { path });
+export const getGkeyStats = () => invoke<GKeyStat[]>("get_gkey_stats");
+export const getDiagnostics = () => invoke<Diagnostics>("get_diagnostics");

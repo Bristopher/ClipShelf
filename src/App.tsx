@@ -1,6 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
-import { getConfig, updateConfig, setWindowOpacity } from "@/lib/commands";
+import { emit, listen } from "@tauri-apps/api/event";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
+import {
+  getConfig,
+  updateConfig,
+  setWindowOpacity,
+  wipeLog,
+  undoLastAction,
+  openSettingsWindow,
+  dropFileToGkey,
+  selectDroppedFile,
+} from "@/lib/commands";
+import { errorMessage, toastError, toastInfo } from "@/lib/toast";
 import { EVENTS } from "@/lib/events";
 import { useEventLog } from "@/hooks/useEventLog";
 import { useTimer } from "@/hooks/useTimer";
@@ -38,9 +49,17 @@ function playBeep() {
   }
 }
 
+// Match the backend watcher's accepted extensions (watcher::is_video_file).
+const VIDEO_EXT_RE = /\.(mp4|mov|avi|mkv)$/i;
+
 function App() {
   const [config, setConfig] = useState<AppConfig | null>(null);
   const { entries, clear, restore } = useEventLog();
+  const [filterOpen, setFilterOpen] = useState(false);
+  // Drag-drop hover state: which G-key button the file is over (1-4), or
+  // null; dragActive drives the "drop to rename" hint over the log.
+  const [dropKey, setDropKey] = useState<number | null>(null);
+  const [dragActive, setDragActive] = useState(false);
 
   useEffect(() => {
     getConfig().then(setConfig).catch(console.error);
@@ -69,6 +88,87 @@ function App() {
     const unlisten = listen(EVENTS.TIMER_EXPIRED, () => {
       if (autoWipeRef.current) {
         clearRef.current();
+      }
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
+
+  // In-app (non-global) shortcuts on the main window. Skipped while typing
+  // in an input (covers the rename dialog and the log filter box).
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) {
+        return;
+      }
+      if (e.key === "Delete" && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+        e.preventDefault();
+        wipeLog()
+          .then(() => clearRef.current())
+          .catch((err) => toastError(errorMessage(err)));
+      } else if (e.ctrlKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        undoLastAction().catch((err) => toastError(errorMessage(err)));
+      } else if (e.ctrlKey && e.key === ",") {
+        e.preventDefault();
+        openSettingsWindow().catch((err) => toastError(errorMessage(err)));
+      } else if (e.ctrlKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        setFilterOpen((v) => !v);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  // Drag-and-drop from Explorer. Tauri's dragDrop swallows HTML5 drag
+  // events, so hover targets are hit-tested from the event's physical
+  // position. G1-G3 buttons sort the dropped file; anywhere else selects it
+  // as the current clip and opens the rename dialog.
+  useEffect(() => {
+    const targetKeyAt = (pos: { x: number; y: number }): number | null => {
+      const dpr = window.devicePixelRatio || 1;
+      const el = document.elementFromPoint(pos.x / dpr, pos.y / dpr);
+      const btn = el?.closest("[data-drop-key]");
+      const key = btn ? Number(btn.getAttribute("data-drop-key")) : NaN;
+      return Number.isInteger(key) ? key : null;
+    };
+
+    const handleDrop = (paths: string[], pos: { x: number; y: number }) => {
+      const videos = paths.filter((p) => VIDEO_EXT_RE.test(p));
+      if (videos.length === 0) {
+        toastError("Only video files (.mp4 .mov .avi .mkv) can be dropped here");
+        return;
+      }
+      if (videos.length > 1) {
+        toastInfo("Multiple files dropped — using the first video");
+      }
+      const path = videos[0];
+      const key = targetKeyAt(pos);
+      if (key !== null && key >= 1 && key <= 3) {
+        dropFileToGkey(path, key).catch((err) => toastError(errorMessage(err)));
+      } else {
+        // G4 / log / anywhere else: make it the current clip and rename it.
+        selectDroppedFile(path)
+          .then((filename) => emit(EVENTS.HOTKEY_TRIGGERED, { key: 4, filename }))
+          .catch((err) => toastError(errorMessage(err)));
+      }
+    };
+
+    const unlisten = getCurrentWebview().onDragDropEvent((event) => {
+      const p = event.payload;
+      if (p.type === "enter" || p.type === "over") {
+        setDragActive(true);
+        setDropKey(targetKeyAt(p.position));
+      } else if (p.type === "drop") {
+        setDragActive(false);
+        setDropKey(null);
+        handleDrop(p.paths, p.position);
+      } else {
+        setDragActive(false);
+        setDropKey(null);
       }
     });
     return () => {
@@ -145,9 +245,21 @@ function App() {
     >
       <TitleBar />
       <div className="flex flex-1 min-h-0 relative">
-        <Sidebar config={config} />
-        <main className="flex-1 flex flex-col min-w-0">
-          <EventLog entries={entries} />
+        <Sidebar config={config} dropKey={dropKey} />
+        <main className="flex-1 flex flex-col min-w-0 relative">
+          <EventLog
+            entries={entries}
+            config={config}
+            filterOpen={filterOpen}
+            onCloseFilter={() => setFilterOpen(false)}
+          />
+          {dragActive && dropKey === null && (
+            <div className="absolute inset-0 z-30 pointer-events-none flex items-center justify-center bg-black/30 border-2 border-dashed border-t-border rounded-sm m-1">
+              <span className="text-xs font-semibold text-t-text bg-panel/90 px-3 py-1.5 rounded border border-t-border shadow">
+                Drop to select &amp; rename — or drop on a G-key to sort
+              </span>
+            </div>
+          )}
           <BottomBar
             mode={config.disable_file_movesorting ? "rename" : "sort"}
             autoWipe={config.auto_wipe_enabled}
@@ -178,7 +290,7 @@ function App() {
           </div>
         )}
       </div>
-      <RenameDialog />
+      <RenameDialog mru={config.rename_mru} />
       <Toaster listenBackendErrors />
     </div>
   );

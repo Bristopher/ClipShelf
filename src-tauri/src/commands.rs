@@ -162,10 +162,24 @@ pub fn do_press_gkey(app: &AppHandle, state: &AppState, key: u8) {
         .unwrap_or(&current.path)
         .clone();
     let config = s.config.clone();
-    let bind = s.bind_chosen.clone();
     drop(s); // Release lock before file operations
 
-    match mover::move_or_rename_file(&file_path, key, &config) {
+    move_file_with_key(app, state, &file_path, key, &gkey_label, &config);
+}
+
+/// Shared move handling for a G-key action: the collision-safe move itself,
+/// then state/current-file/undo/stats bookkeeping, log + events, sound.
+/// Used by key presses (current clip) and drag-drops (explicit path).
+/// Blocking (retry sleeps) — callers run it off the async workers.
+fn move_file_with_key(
+    app: &AppHandle,
+    state: &AppState,
+    file_path: &std::path::Path,
+    key: u8,
+    log_label: &str,
+    config: &AppConfig,
+) {
+    match mover::move_or_rename_file(file_path, key, config) {
         Ok(result) => {
             let Ok(mut s) = state.lock() else { return };
             s.current_file = Some(CurrentFile {
@@ -177,6 +191,7 @@ pub fn do_press_gkey(app: &AppHandle, state: &AppState, key: u8) {
                 from: result.original_path.clone(),
                 to: result.new_path.clone(),
             });
+            s.record_gkey_move(key, result.new_path.clone());
             let mode = if config.disable_file_movesorting {
                 "renamed"
             } else {
@@ -200,14 +215,12 @@ pub fn do_press_gkey(app: &AppHandle, state: &AppState, key: u8) {
                 },
             );
             if config.log_file_enabled {
-                if let Some(ref bind) = bind {
-                    let basename = file_path
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("unknown");
-                    s.logger
-                        .write_to_file(&format!("{} | {}", bind, basename));
-                }
+                let basename = file_path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("unknown");
+                s.logger
+                    .write_to_file(&format!("{} | {}", log_label, basename));
             }
             if config.move_sound_enabled {
                 let resource_dir = app.path().resource_dir().unwrap_or_default();
@@ -231,6 +244,120 @@ pub fn do_press_gkey(app: &AppHandle, state: &AppState, key: u8) {
             );
         }
     }
+}
+
+/// A file dragged from Explorer and dropped onto a G-key button — sort that
+/// exact file through the normal move path. Manual fallback for clips the
+/// watcher missed, or for sorting old clips.
+#[tauri::command]
+pub async fn drop_file_to_gkey(
+    path: String,
+    key: u8,
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<(), String> {
+    let file_path = std::path::PathBuf::from(&path);
+    if !crate::watcher::is_video_file(&file_path) {
+        return Err("Not a video file".to_string());
+    }
+    if !file_path.exists() {
+        return Err("File no longer exists at this location".to_string());
+    }
+    if !(1..=3).contains(&key) {
+        return Err(format!("Invalid gkey: {}. Must be 1, 2, or 3.", key));
+    }
+    let st = state.inner().clone();
+    // Blocking pool — the move retries with sleeps, same as the hotkey path.
+    tauri::async_runtime::spawn_blocking(move || {
+        let config = {
+            let Ok(s) = st.lock() else { return };
+            s.config.clone()
+        };
+        let label = format!("G{} (drop)", key);
+        move_file_with_key(&app, &st, &file_path, key, &label, &config);
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+/// A file dropped onto the log/rename area — make it the current clip (so
+/// rename/G-keys operate on it) and return its filename for the dialog.
+#[tauri::command]
+pub fn select_dropped_file(
+    path: String,
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<String, String> {
+    let file_path = std::path::PathBuf::from(&path);
+    if !crate::watcher::is_video_file(&file_path) {
+        return Err("Not a video file".to_string());
+    }
+    if !file_path.exists() {
+        return Err("File no longer exists at this location".to_string());
+    }
+    let filename = file_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unknown")
+        .to_string();
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    s.current_file = Some(CurrentFile {
+        path: file_path.clone(),
+        moved_path: None,
+        renamed: false,
+    });
+    s.bind_chosen = None;
+    let entry = s.logger.log_with_path(
+        LogLevel::Info,
+        format!("Selected clip: {}", filename),
+        LogCategory::FileCreated,
+        Some(file_path.to_string_lossy().to_string()),
+    );
+    let _ = app.emit("log-entry", &entry);
+    Ok(filename)
+}
+
+/// Session move stats for all G-keys (sidebar badges + flyouts).
+#[tauri::command]
+pub fn get_gkey_stats(state: State<'_, AppState>) -> Result<Vec<GKeyStatPayload>, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    Ok((1u8..=3)
+        .map(|key| {
+            let stat = s.gkey_stats.get(&key).cloned().unwrap_or_default();
+            GKeyStatPayload {
+                key,
+                count: stat.count,
+                recent: stat
+                    .recent
+                    .iter()
+                    .map(|p| RecentClipPayload {
+                        name: p
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("unknown")
+                            .to_string(),
+                        path: p.to_string_lossy().to_string(),
+                    })
+                    .collect(),
+            }
+        })
+        .collect())
+}
+
+/// Snapshot for the diagnostics popover.
+#[tauri::command]
+pub fn get_diagnostics(state: State<'_, AppState>) -> Result<DiagnosticsPayload, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    Ok(DiagnosticsPayload {
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        config_path: s.config_path.to_string_lossy().to_string(),
+        videos_folder: s.config.videos_folder.clone(),
+        watcher_status: s.last_watcher_status.clone(),
+        watcher_restart_count: s.watcher_restart_count,
+        watch_paused: s.watch_paused,
+        obs_enabled: s.config.obs_websocket_enabled,
+        obs_status: s.last_obs_status.clone(),
+    })
 }
 
 #[tauri::command]
@@ -311,6 +438,16 @@ fn do_rename_file(app: &AppHandle, state: &AppState, text: &str) {
                 s.logger
                     .write_to_file(&format!("Renamed: {} ---------> {}", old_name, new_name));
             }
+            // Remember the text in the rename MRU so the dialog can offer it
+            // as a one-click chip next time. Persisted in config; disk write
+            // happens outside the state lock.
+            s.config.push_rename_mru(text);
+            let (cfg, cfg_path) = (s.config.clone(), s.config_path.clone());
+            drop(s);
+            if let Err(e) = cfg.save_to(&cfg_path) {
+                log::warn!("Failed to persist rename MRU: {}", e);
+            }
+            let _ = app.emit("config-changed", &cfg);
         }
         Err(e) => {
             let Ok(mut s) = state.lock() else { return };

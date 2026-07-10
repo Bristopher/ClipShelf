@@ -94,6 +94,32 @@ export interface AppConfig {
   default_monitor: number;
   /** Anchor corner for the default open position. */
   default_anchor: string;
+  /** Most-recently-used rename texts, newest first (backend-maintained). */
+  rename_mru: string[];
+}
+
+export interface RecentClip {
+  name: string;
+  path: string;
+}
+
+/** Session move stats for one G-key (sidebar badge + flyout). */
+export interface GKeyStat {
+  key: number;
+  count: number;
+  recent: RecentClip[];
+}
+
+/** Snapshot for the diagnostics popover. */
+export interface Diagnostics {
+  version: string;
+  configPath: string;
+  videosFolder: string;
+  watcherStatus: string;
+  watcherRestartCount: number;
+  watchPaused: boolean;
+  obsEnabled: boolean;
+  obsStatus: string;
 }
 
 export interface CountUpTick {

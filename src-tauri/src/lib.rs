@@ -609,6 +609,10 @@ pub fn run() {
             commands::get_monitor_count,
             commands::get_watcher_status,
             commands::get_obs_status,
+            commands::drop_file_to_gkey,
+            commands::select_dropped_file,
+            commands::get_gkey_stats,
+            commands::get_diagnostics,
         ])
         .on_window_event(|window, event| {
             match event {

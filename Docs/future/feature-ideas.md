@@ -1,46 +1,35 @@
 # Future Feature Ideas (parking lot)
 
-Bigger features surfaced by the 2026-07-05 audit that we deliberately deferred.
-Each is worth its own small design pass before building.
+Most of the 2026-07-05 parking lot shipped in the 2026-07-10 feature batch
+(see `Docs/specs/2026-07-10-feature-batch-design.md`): drag-and-drop sort,
+per-G-key stats + flyout, rename MRU, log filter + context menu, richer
+empty state, first-run OBS section, in-app shortcuts, diagnostics popover.
+What remains below are the pieces deliberately deferred out of those.
 
-## Drag-and-drop a clip onto the bar (L)
-Tauri supports file-drop events. Dropping a video file onto a G-key button
-sorts it to that folder; dropping onto the log area opens the rename dialog
-for it. Natural manual fallback when the watcher missed a file or for sorting
-old clips. Needs: file-drop handler, hover highlight on the G-key buttons,
-routing through the same collision-safe `mover` path (set it as
-`current_file` or add a `move_specific_file` command).
+## Rename token templates (M)
+The MRU chips shipped; the power version is templates with tokens like
+`{game} {date} {n}`. `{n}` needs counter semantics (per session? per day?
+per stem?) — decide that before building. Needs: token expansion (frontend
+or in `mover::rename_file_with_text`), template management UI.
 
-## Per-G-key stats + recent-clips flyout (L)
-Show a running count per key ("G1 · 12 today") and a small flyout listing the
-last N clips sorted to each folder (name + click-to-reveal, maybe thumbnails
-via ffmpeg or the Windows Shell thumbnail cache). Answers "did that sort land
-where I think it did?" without reading the log. Needs: per-key counters in
-AppState (persisted daily or session-only), a flyout component.
+## Flyout thumbnails (M)
+The per-G-key recent-clips flyout is text-only. Thumbnails need ffmpeg or
+the Windows Shell thumbnail cache (IThumbnailProvider) — weigh the
+dependency; shell cache is the lighter option.
 
-## Rename templates / tokens (M)
-The rename dialog appends free text. Power version: templates with tokens
-like `{game} {date} {n}`, plus a most-recently-used names list (one keypress
-to re-apply "clutch"). Needs: template parsing in `mover::rename_file_with_text`
-or a frontend-side expansion, MRU list persisted in config.
+## Persistent per-G-key stats (S)
+Stats are session-only (reset on launch). A "today" counter that survives
+restarts needs a small persisted file with a date-rollover — decide whether
+daily/weekly/all-time before adding.
 
-## Log search / filter / copy-path (M)
-A filter box over the event log (text + level/category chips) and a
-right-click context menu on entries: Copy path, Copy filename, Reveal, Play.
-Becomes valuable once sessions get long; pairs with the 500-entry cap.
+## First-run OBS live test-connection (S-M)
+The first-run OBS section saves credentials and points at the status dot
+for feedback. A one-shot "Test" button needs a single-attempt connect
+(current `connect_and_run` is loop-oriented). Revisit if users get confused
+by the save-then-look flow.
 
-## Richer empty state + OBS step in first-run (M)
-Empty log currently says "Waiting for events...". Could show: watched folder
-path, watcher/OBS status lines, "press <save_clip_bind> in your game to test".
-First-run wizard has no OBS WebSocket step even though it's a core
-integration — add an optional page with password + live test-connection.
-
-## In-app keyboard shortcuts on the main window (S-M)
-The main bar has no local (non-global) shortcuts: e.g. Del = Wipe,
-Ctrl+Z-in-window = Undo, Ctrl+, = Settings. Cheap muscle-memory wins, just
-needs a keydown handler + a small help tooltip listing them.
-
-## Watcher restart button / diagnostics panel (S)
-`restart_watcher` command exists with no UI. A small diagnostics popover
-(watcher status, restart count, last error, OBS status, config path) with a
-Restart button would make support/debugging self-serve.
+## Multi-file drag-drop batch sort (M)
+Dropping multiple videos currently uses the first and toasts about the
+rest. Batch mode (sort ALL dropped files to the target key) is easy on the
+backend (loop the shared move path) but needs UX for partial failures and
+undo-of-a-batch semantics.

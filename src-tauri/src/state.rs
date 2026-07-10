@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
@@ -26,6 +27,19 @@ pub struct UndoEntry {
 /// Cap on the undo history — enough for a whole session of mis-presses
 /// without growing unbounded.
 pub const UNDO_STACK_MAX: usize = 20;
+
+/// How many recent clips to remember per G-key for the sidebar flyout.
+pub const GKEY_RECENT_MAX: usize = 5;
+
+/// Session-only per-G-key move stats: how many clips were sorted with this
+/// key and where the last few ended up. Answers "did that sort land where I
+/// think it did?" without reading the log. Resets on launch.
+#[derive(Debug, Clone, Default)]
+pub struct GKeyStat {
+    pub count: u32,
+    /// Newest first, capped at GKEY_RECENT_MAX.
+    pub recent: Vec<PathBuf>,
+}
 
 pub struct AppStateInner {
     pub current_file: Option<CurrentFile>,
@@ -67,6 +81,9 @@ pub struct AppStateInner {
     /// Last OBS WebSocket status string emitted (see obs_ws.rs statuses).
     /// Same rationale as `last_watcher_status`.
     pub last_obs_status: String,
+
+    /// Session-only per-G-key move stats, keyed 1-3.
+    pub gkey_stats: HashMap<u8, GKeyStat>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -101,6 +118,7 @@ impl AppStateInner {
             watch_paused: false,
             last_watcher_status: "stopped".to_string(),
             last_obs_status: "disabled".to_string(),
+            gkey_stats: HashMap::new(),
         }
     }
 
@@ -110,6 +128,15 @@ impl AppStateInner {
             self.undo_stack.remove(0);
         }
         self.undo_stack.push(entry);
+    }
+
+    /// Record a successful G-key move for the session stats.
+    pub fn record_gkey_move(&mut self, key: u8, dest: PathBuf) {
+        let stat = self.gkey_stats.entry(key).or_default();
+        stat.count += 1;
+        stat.recent.retain(|p| p != &dest);
+        stat.recent.insert(0, dest);
+        stat.recent.truncate(GKEY_RECENT_MAX);
     }
 }
 
@@ -123,4 +150,35 @@ pub struct ChannelState {
     pub count_up_tx: mpsc::Sender<CountUpCommand>,
     pub obs_cmd_tx: mpsc::Sender<crate::obs_ws::ObsWsCommand>,
     pub hotkey_controller: crate::hotkeys::HotkeyController,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::AppConfig;
+
+    #[test]
+    fn test_record_gkey_move_counts_and_caps_recent() {
+        let mut s = AppStateInner::new(AppConfig::default(), PathBuf::new());
+
+        for i in 0..7 {
+            s.record_gkey_move(1, PathBuf::from(format!("C:/clips/clip{}.mp4", i)));
+        }
+        s.record_gkey_move(2, PathBuf::from("C:/clips/other.mp4"));
+
+        let g1 = s.gkey_stats.get(&1).unwrap();
+        assert_eq!(g1.count, 7);
+        assert_eq!(g1.recent.len(), GKEY_RECENT_MAX);
+        assert_eq!(g1.recent[0], PathBuf::from("C:/clips/clip6.mp4"));
+
+        // Re-recording the same destination moves it to the front instead
+        // of duplicating it (count still increments — it was a real move).
+        s.record_gkey_move(1, PathBuf::from("C:/clips/clip3.mp4"));
+        let g1 = s.gkey_stats.get(&1).unwrap();
+        assert_eq!(g1.count, 8);
+        assert_eq!(g1.recent[0], PathBuf::from("C:/clips/clip3.mp4"));
+        assert_eq!(g1.recent.len(), GKEY_RECENT_MAX);
+
+        assert_eq!(s.gkey_stats.get(&2).unwrap().count, 1);
+    }
 }
