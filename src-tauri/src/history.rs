@@ -19,6 +19,8 @@ pub struct HistoryEvent {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub game: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub exe: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub key: Option<u8>,
     /// 1-5 stars (human scale; the Windows property uses 1-99).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -39,6 +41,7 @@ impl HistoryEvent {
             path: path.to_string_lossy().to_string(),
             old_path: None,
             game: None,
+            exe: None,
             key: None,
             rating: None,
             label: None,
@@ -47,6 +50,7 @@ impl HistoryEvent {
         }
     }
     pub fn with_game(mut self, game: &str) -> Self { self.game = Some(game.to_string()); self }
+    pub fn with_exe(mut self, exe: &str) -> Self { self.exe = Some(exe.to_string()); self }
     pub fn with_old_path(mut self, p: &Path) -> Self { self.old_path = Some(p.to_string_lossy().to_string()); self }
     pub fn with_key(mut self, key: u8) -> Self { self.key = Some(key); self }
     // consumed in Phase 2/3 (rate/label/describe events)
@@ -158,6 +162,18 @@ mod tests {
     #[test]
     fn test_read_missing_file_is_empty() {
         assert!(read_all(Path::new("C:/does/not/exist/history.jsonl")).is_empty());
+    }
+
+    #[test]
+    fn test_exe_field_roundtrip_and_omitted_when_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("history.jsonl");
+        append(&path, &HistoryEvent::new("created", Path::new("C:/a.mp4"), "app")
+            .with_game("Counter-Strike 2").with_exe("cs2"));
+        append(&path, &HistoryEvent::new("moved", Path::new("C:/b.mp4"), "app"));
+        let all = read_all(&path);
+        assert_eq!(all[0].exe.as_deref(), Some("cs2"));
+        assert!(serde_json::to_string(&all[1]).unwrap().contains("\"exe\"") == false);
     }
 
     #[test]

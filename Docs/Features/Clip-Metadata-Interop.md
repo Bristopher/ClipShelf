@@ -129,6 +129,7 @@ applicable; **skip unparseable lines** when reading (the app does too).
   "path": "C:/clips/clip.mp4",
   "old_path": "C:/clips/old.mp4",
   "game": "Counter-Strike 2",
+  "exe": "cs2",
   "key": 1,
   "rating": 4,
   "label": "clutch",
@@ -140,6 +141,9 @@ applicable; **skip unparseable lines** when reading (the app does too).
 Notes for consumers:
 - `ts` is RFC 3339 with local offset. The app's "day" starts at the configured rollover
   hour (default 4 AM) — bucket accordingly if you want to match its History panel.
+- `exe` is optional and present on `created` events when detection ran; it records the
+  detected process's exe stem (e.g. `cs2`) separately from the resolved `game` label —
+  additive since 2026-07-12.
 - `rating` here is **1–5 stars** (human scale); only the Windows property uses 1–99.
 - The latest `moved`/`renamed` event for a clip has its current `path`; follow the
   `old_path` → `path` chain to track a file across events.

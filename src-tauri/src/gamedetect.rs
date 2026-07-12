@@ -17,8 +17,6 @@ pub struct ForegroundApp {
 #[derive(Debug, Clone)]
 pub struct GameSnapshot {
     pub label: String,
-    // consumed in Phase 2/3 (per-exe override remembering / game-edit UI)
-    #[allow(dead_code)]
     pub exe_stem: String,
     pub taken_at: SystemTime,
 }

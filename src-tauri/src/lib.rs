@@ -782,17 +782,17 @@ async fn handle_file_created(
     // Game detection: prefer the snapshot from the save-press instant;
     // fall back to "what's focused right now" for clips that arrived
     // without a hotkey press (watcher-only / OBS event).
-    let game: Option<String> = {
+    let game_snap: Option<gamedetect::GameSnapshot> = {
         let taken = {
             let mut s = state.lock().unwrap();
             s.take_pending_game(std::time::Duration::from_secs(30))
         };
         match taken {
-            Some(snap) => Some(snap.label),
+            Some(snap) => Some(snap),
             None if config.game_detection_enabled => {
                 let overrides = config.game_overrides.clone();
                 tauri::async_runtime::spawn_blocking(move || {
-                    gamedetect::snapshot_foreground(&overrides).map(|s| s.label)
+                    gamedetect::snapshot_foreground(&overrides)
                 })
                 .await
                 .ok()
@@ -801,6 +801,7 @@ async fn handle_file_created(
             None => None,
         }
     };
+    let game: Option<String> = game_snap.as_ref().map(|s| s.label.clone());
     let (config_path, hist_event) = {
         let mut s = state.lock().unwrap();
         if let Some(g) = &game {
@@ -809,6 +810,9 @@ async fn handle_file_created(
         let mut e = history::HistoryEvent::new("created", &path, "app");
         if let Some(g) = &game {
             e = e.with_game(g);
+        }
+        if let Some(snap) = &game_snap {
+            e = e.with_exe(&snap.exe_stem);
         }
         (s.config_path.clone(), e)
     };
