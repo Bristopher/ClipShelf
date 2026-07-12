@@ -135,26 +135,34 @@ fn write_properties(path: &Path, values: &[PropValue]) -> Result<(), String> {
             .map_err(|e| format!("open property store: {e}"))?;
 
             for v in values {
-                let (key_name, mut var) = match v {
-                    PropValue::Game(name) => (
-                        "System.Keywords",
-                        InitPropVariantFromStringAsVector(&HSTRING::from(name.as_str()))
-                            .map_err(|e| format!("keywords propvariant: {e}"))?,
-                    ),
-                    PropValue::Stars(stars) => (
-                        "System.Rating",
-                        propvariant_from_u32(stars_to_system_rating(*stars)),
-                    ),
-                    PropValue::Description(text) => (
-                        "System.Comment",
-                        // Single VT_LPWSTR string — NOT a vector.
-                        propvariant_from_string(text)
-                            .map_err(|e| format!("comment propvariant: {e}"))?,
-                    ),
+                // Resolve the property key BEFORE constructing the
+                // PROPVARIANT: if resolution fails we return while no
+                // allocation exists yet, so a `?` here can't leak the
+                // CoTaskMem'd string buffer (the Clear below only runs
+                // after SetValue).
+                let key_name = match v {
+                    PropValue::Game(_) => "System.Keywords",
+                    PropValue::Stars(_) => "System.Rating",
+                    PropValue::Description(_) => "System.Comment",
                 };
                 let mut key = windows::Win32::Foundation::PROPERTYKEY::default();
                 PSGetPropertyKeyFromName(&HSTRING::from(key_name), &mut key)
                     .map_err(|e| format!("resolve {key_name}: {e}"))?;
+
+                let mut var = match v {
+                    PropValue::Game(name) => {
+                        InitPropVariantFromStringAsVector(&HSTRING::from(name.as_str()))
+                            .map_err(|e| format!("keywords propvariant: {e}"))?
+                    }
+                    PropValue::Stars(stars) => {
+                        propvariant_from_u32(stars_to_system_rating(*stars))
+                    }
+                    PropValue::Description(text) => {
+                        // Single VT_LPWSTR string — NOT a vector.
+                        propvariant_from_string(text)
+                            .map_err(|e| format!("comment propvariant: {e}"))?
+                    }
+                };
                 let set_result = store
                     .SetValue(&key, &var)
                     .map_err(|e| format!("set {key_name}: {e}"));
