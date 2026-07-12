@@ -7,6 +7,7 @@ mod hotkeys;
 mod logger;
 mod mover;
 mod obs_ws;
+mod props;
 mod sound;
 mod state;
 mod stats;
