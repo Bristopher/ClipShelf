@@ -114,7 +114,10 @@ pub struct CalibrationSample {
 impl AppStateInner {
     pub fn new(config: AppConfig, config_path: PathBuf) -> Self {
         let logger = AppLogger::new(&config.videos_folder, config.log_file_enabled);
-        let daily_stats = crate::stats::load(&crate::stats::stats_path(&config_path));
+        let daily_stats = crate::stats::load(
+            &crate::stats::stats_path(&config_path),
+            config.day_rollover_hour,
+        );
         Self {
             current_file: None,
             bind_chosen: None,
@@ -164,7 +167,7 @@ impl AppStateInner {
     /// the session recent list. Caller saves `daily_stats` to disk OUTSIDE
     /// the state lock.
     pub fn record_gkey_move(&mut self, key: u8, dest: PathBuf) {
-        self.daily_stats.increment(key);
+        self.daily_stats.increment(key, self.config.day_rollover_hour);
         let recent = self.gkey_recent.entry(key).or_default();
         recent.retain(|p| p != &dest);
         recent.insert(0, dest);
