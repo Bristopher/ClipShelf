@@ -43,9 +43,22 @@ fn default_remember_window_layout() -> bool { true }
 fn default_monitor() -> u32 { 2 }
 fn default_anchor() -> String { "top-left".to_string() }
 fn default_rename_mru() -> Vec<String> { Vec::new() }
+fn default_game_detection_enabled() -> bool { true }
+fn default_write_file_properties() -> bool { true }
+fn default_day_rollover_hour() -> u8 { 4 }
+fn default_game_overrides() -> Vec<GameOverride> { Vec::new() }
 
 /// Max entries kept in the rename most-recently-used list.
 pub const RENAME_MRU_MAX: usize = 8;
+
+/// exe stem → display-name override, remembered when the user corrects a
+/// wrong detection. A Vec of structs, NOT a HashMap: TOML rejects non-string
+/// map keys and the list form renders cleanly in the config file.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GameOverride {
+    pub exe: String,
+    pub name: String,
+}
 
 // --- AppConfig struct ---
 
@@ -198,6 +211,25 @@ pub struct AppConfig {
     /// dialog shows these as one-click chips.
     #[serde(default = "default_rename_mru")]
     pub rename_mru: Vec<String>,
+
+    /// Detect the focused game/app when a clip is saved and record it in
+    /// history + file properties. Master switch for the whole feature.
+    #[serde(default = "default_game_detection_enabled")]
+    pub game_detection_enabled: bool,
+
+    /// Mirror game/rating/description into Windows file properties
+    /// (Explorer Tags/Rating/Comments). history.jsonl is written regardless.
+    #[serde(default = "default_write_file_properties")]
+    pub write_file_properties: bool,
+
+    /// Hour (0-23) at which "today" starts for history and daily stats —
+    /// default 4 AM so a late-night session doesn't split at midnight.
+    #[serde(default = "default_day_rollover_hour")]
+    pub day_rollover_hour: u8,
+
+    /// User corrections for misdetected games, checked before heuristics.
+    #[serde(default = "default_game_overrides")]
+    pub game_overrides: Vec<GameOverride>,
 }
 
 impl Default for AppConfig {
@@ -241,6 +273,10 @@ impl Default for AppConfig {
             default_monitor: default_monitor(),
             default_anchor: default_anchor(),
             rename_mru: default_rename_mru(),
+            game_detection_enabled: default_game_detection_enabled(),
+            write_file_properties: default_write_file_properties(),
+            day_rollover_hour: default_day_rollover_hour(),
+            game_overrides: default_game_overrides(),
         }
     }
 }
@@ -327,6 +363,14 @@ impl AppConfig {
         self.rename_mru.retain(|t| t.to_lowercase() != lower);
         self.rename_mru.insert(0, text.to_string());
         self.rename_mru.truncate(RENAME_MRU_MAX);
+    }
+
+    /// Upsert a detection override (case-insensitive on exe stem).
+    #[allow(dead_code)]
+    pub fn remember_game_override(&mut self, exe: &str, name: &str) {
+        let lower = exe.to_lowercase();
+        self.game_overrides.retain(|o| o.exe.to_lowercase() != lower);
+        self.game_overrides.push(GameOverride { exe: exe.to_string(), name: name.to_string() });
     }
 
     /// Returns the sort folder path for a given G-key number (1, 2, or 3).
@@ -513,5 +557,35 @@ timer_duration_ms = 45000
 
         let p3 = cfg.sort_folder_path(3);
         assert_eq!(p3, PathBuf::from("C:/Videos/sort/AHK sort/!!! (G3)"));
+    }
+
+    #[test]
+    fn test_game_detection_defaults() {
+        let cfg = AppConfig::default();
+        assert!(cfg.game_detection_enabled);
+        assert!(cfg.write_file_properties);
+        assert_eq!(cfg.day_rollover_hour, 4);
+        assert!(cfg.game_overrides.is_empty());
+    }
+
+    #[test]
+    fn test_game_overrides_toml_roundtrip() {
+        let tmp = NamedTempFile::new().unwrap();
+        let mut cfg = AppConfig::default();
+        cfg.remember_game_override("cs2", "Counter-Strike 2");
+        cfg.save_to(tmp.path()).expect("save");
+        let loaded = AppConfig::load_from(tmp.path()).expect("load");
+        assert_eq!(loaded.game_overrides.len(), 1);
+        assert_eq!(loaded.game_overrides[0].exe, "cs2");
+        assert_eq!(loaded.game_overrides[0].name, "Counter-Strike 2");
+    }
+
+    #[test]
+    fn test_remember_game_override_upserts_case_insensitive() {
+        let mut cfg = AppConfig::default();
+        cfg.remember_game_override("CS2", "Wrong Name");
+        cfg.remember_game_override("cs2", "Counter-Strike 2");
+        assert_eq!(cfg.game_overrides.len(), 1);
+        assert_eq!(cfg.game_overrides[0].name, "Counter-Strike 2");
     }
 }

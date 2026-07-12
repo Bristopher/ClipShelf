@@ -96,6 +96,10 @@ export interface AppConfig {
   default_anchor: string;
   /** Most-recently-used rename texts, newest first (backend-maintained). */
   rename_mru: string[];
+  game_detection_enabled: boolean;
+  write_file_properties: boolean;
+  day_rollover_hour: number;
+  game_overrides: { exe: string; name: string }[];
 }
 
 export interface RecentClip {
