@@ -1,6 +1,12 @@
 # Clip Metadata Interop — Reading Gkey Mover Data From Other Apps
 
-**Status:** Designed, not yet implemented (spec: `Docs/specs/2026-07-12-game-detection-history-overlay-design.md`).
+**Status:** Partially implemented (Phase 1, shipped 2026-07-12,
+spec: `Docs/specs/2026-07-12-game-detection-history-overlay-design.md`).
+`history.jsonl` (§3) is live for `created`/`moved`/`renamed`/`undone` events with
+game context, and the game name is written to `System.Keywords` (§2). Everything
+else below is still design-only: `rated`/`labeled`/`described`/`game_edited`
+history events, the `System.Rating`/`System.Comment` property writes, and the
+filename label suffix convention (§1) — those land with the overlay in Phase 3.
 Field names and mappings below are the contract — implementation must match this doc, and
 changes to the scheme must update this doc in the same change.
 

@@ -1,13 +1,18 @@
 # Master Verification Checklist (2026-07-10)
 
+**Updated:** 2026-07-12
+
 Everything code-verified but not yet exercised live, across three batches:
 the 2026-07-02 QoL batch (undo, pause, clickable log, autostart, window
 layout), the 2026-07-05 stability/toasts/UX batch, and the two 2026-07-10
 feature rounds (drag-drop, diagnostics, MRU/tokens, filter, stats, first-run
 OBS, batch undo). Supersedes the two older checklists in this folder.
+§15 adds the 2026-07-12 game-detection + history-store feature (Phase 1).
 
-All of it passes 51/51 cargo tests, tsc, and pnpm build. Work through
-§1–§12 in `pnpm tauri dev`, then §13–§14 with `.\build-release.ps1`.
+All of it passes 51/51 cargo tests, tsc, and pnpm build (§1–§14). §15's
+game-detection round adds its own suite — see that section for numbers.
+Work through §1–§12 in `pnpm tauri dev`, then §13–§14 with
+`.\build-release.ps1`.
 
 Specs: `Docs/specs/2026-07-05-stability-round2-and-error-surface-design.md`,
 `Docs/specs/2026-07-10-feature-batch-design.md`.
@@ -148,3 +153,43 @@ Specs: `Docs/specs/2026-07-05-stability-round2-and-error-surface-design.md`,
       `*.toml.tmp` files after saves
 - [ ] gkey_stats.toml holds date + g1/g2/g3; counts reset the next
       calendar day
+
+## 15. Game detection + history store
+
+Commits `7eba313..7e06621` (six commits on `main`), shipped 2026-07-12.
+Spec: `Docs/specs/2026-07-12-game-detection-history-overlay-design.md`.
+Phase 1 only — the History panel UI and stats-rollover switch land in
+Phase 2; rating/label/description writers and the overlay land in Phase 3.
+
+**Automated coverage** — full suite 67 passed, `cargo build` zero warnings,
+`tsc` + `pnpm build` clean:
+- `history.rs`: `test_history_path_is_sibling_of_config`,
+  `test_append_and_read_roundtrip`, `test_read_skips_corrupt_lines`,
+  `test_read_missing_file_is_empty`, `test_optional_fields_omitted_from_json`
+- `config.rs`: `test_game_detection_defaults`,
+  `test_game_overrides_toml_roundtrip`,
+  `test_remember_game_override_upserts_case_insensitive`
+- `gamedetect.rs`: `test_override_wins_regardless_of_fullscreen`,
+  `test_fullscreen_prefers_product_name_then_title_then_exe`,
+  `test_windowed_gets_desktop_prefix`, `test_whitespace_product_name_is_ignored`
+- `props.rs`: `test_stars_to_system_rating_explorer_scale`,
+  `test_probe_exclusive_free_vs_held_file`, `test_probe_missing_file_is_false`
+- `state.rs`: `test_take_pending_game_respects_age`
+
+**NOT covered by automation** — live Win32 foreground detection, the actual
+COM property write as it appears in Explorer, lock-retry behavior against a
+genuinely held file, and the Settings section's look/feel. Human items:
+
+- [ ] Clip saved while a fullscreen game is focused → log shows
+      `— <game>`; `history.jsonl` gains a `created` line with the right
+      game; Explorer Details shows the game in Tags after OBS releases the
+      file
+- [ ] Borderless-windowed game → same result
+- [ ] Clip saved with only Discord focused (windowed) → `Desktop-Discord`
+- [ ] Wrong detection → add override in Settings → next clip uses the
+      corrected name
+- [ ] Hold the file open in another program → property write retries then
+      skips with a warning log line; history still has the game
+- [ ] G1 move / rename / undo each append their history line (open the
+      JSONL and eyeball)
+- [ ] Detection toggle off → no game anywhere, everything else unaffected
