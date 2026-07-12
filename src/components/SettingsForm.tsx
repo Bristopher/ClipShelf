@@ -625,7 +625,7 @@ export function SettingsForm({ config, onConfigChange }: SettingsFormProps) {
           />
           <p className="text-[10px] text-t-muted">
             History and daily stats roll over at this hour — default 4 AM for
-            late-night sessions.
+            late-night sessions. (takes effect with the History panel)
           </p>
         </div>
         <GameOverridesEditor config={config} onConfigChange={onConfigChange} />

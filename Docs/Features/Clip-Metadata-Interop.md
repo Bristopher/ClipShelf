@@ -109,8 +109,15 @@ const props = JSON.parse(out);
 
 ## 3. `history.jsonl` — the full event log
 
-Location: next to the app config, which lives **beside the GKey Mover executable** —
-`<install folder>\history.jsonl` (same folder as `gkey_config.toml` and `gkey_stats.toml`).
+Location: next to the app config. The config's primary home is the per-user
+app-config dir resolved by Tauri — on Windows that is
+`%APPDATA%\com.cbuzi.gkey-mover-v2\` (i.e.
+`C:\Users\<you>\AppData\Roaming\com.cbuzi.gkey-mover-v2\`), so `history.jsonl`
+sits there beside `gkey_config.toml` and `gkey_stats.toml`. A legacy
+exe-adjacent location (`<install folder>\` next to the GKey Mover executable) is
+still read as a fallback: if a config is found there and none exists in
+`%APPDATA%` yet, it is migrated forward, and if Tauri cannot resolve the
+app-config dir the app falls back to the exe-adjacent path.
 
 Append-only JSON Lines, one event per line, kept forever. Fields absent when not
 applicable; **skip unparseable lines** when reading (the app does too).

@@ -624,11 +624,11 @@ pub fn do_undo(app: &AppHandle, state: &AppState) {
                 // undo in history (best-effort, after the lock is dropped).
                 let game = s.clip_games.remove(&mv.to);
                 if let Some(g) = &game {
-                    s.clip_games.insert(mv.from.clone(), g.clone());
+                    s.clip_games.insert(restored.clone(), g.clone());
                 }
                 let config_path = s.config_path.clone();
                 drop(s);
-                let mut ev = crate::history::HistoryEvent::new("undone", &mv.from, "app")
+                let mut ev = crate::history::HistoryEvent::new("undone", &restored, "app")
                     .with_old_path(&mv.to);
                 if let Some(g) = &game {
                     ev = ev.with_game(g);

@@ -815,16 +815,53 @@ async fn handle_file_created(
     let hist_path = history::history_path(&config_path);
     let write_props = config.write_file_properties;
     {
-        let path_for_props = path.clone();
+        let creation_path = path.clone();
         let game_for_props = game.clone();
+        let state_for_props = state.clone();
+        let app_for_props = app.clone();
         tauri::async_runtime::spawn_blocking(move || {
             history::append(&hist_path, &hist_event);
             if write_props {
                 if let Some(g) = game_for_props {
-                    if let Err(msg) =
-                        props::write_with_retry(&path_for_props, &[props::PropValue::Game(g)])
-                    {
+                    // Re-resolve the clip's current path before every probe:
+                    // if the user G-key-sorts this clip while OBS still holds
+                    // the file, clip_games is re-keyed to the new path and the
+                    // creation path no longer exists — the write must follow
+                    // the clip, not probe a dead path until it gives up. Lock
+                    // ONLY to read the path, then drop before probing/sleeping.
+                    let resolve = || -> Option<std::path::PathBuf> {
+                        let s = state_for_props.lock().ok()?;
+                        // Unmoved: the creation path is still keyed in the
+                        // session map, so use it directly.
+                        if s.clip_games.contains_key(&creation_path) {
+                            return Some(creation_path.clone());
+                        }
+                        // Moved/renamed during the retry window — follow the
+                        // active clip (best-effort; current_file tracks the
+                        // most-recent clip, which in the fast-sort flow is the
+                        // one just sorted).
+                        if let Some(cf) = &s.current_file {
+                            return Some(cf.moved_path.clone().unwrap_or_else(|| cf.path.clone()));
+                        }
+                        Some(creation_path.clone())
+                    };
+                    if let Err(msg) = props::write_with_retry_resolving(
+                        resolve,
+                        &[props::PropValue::Game(g)],
+                        props::PROBE_ATTEMPTS,
+                        std::time::Duration::from_millis(props::PROBE_DELAY_MS),
+                    ) {
+                        // Keep the dev-console line, but also surface it in the
+                        // app log + UI so the skip is visible in release builds.
                         eprintln!("props: {}", msg);
+                        if let Ok(mut s) = state_for_props.lock() {
+                            let entry = s.logger.log(
+                                LogLevel::Warning,
+                                format!("Property write skipped: {}", msg),
+                                LogCategory::System,
+                            );
+                            let _ = app_for_props.emit("log-entry", &entry);
+                        }
                     }
                 }
             }

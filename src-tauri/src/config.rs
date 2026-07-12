@@ -366,7 +366,7 @@ impl AppConfig {
     }
 
     /// Upsert a detection override (case-insensitive on exe stem).
-    #[allow(dead_code)]
+    #[allow(dead_code)] // consumed in Phase 2/3 (History panel / overlay "Remember")
     pub fn remember_game_override(&mut self, exe: &str, name: &str) {
         let lower = exe.to_lowercase();
         self.game_overrides.retain(|o| o.exe.to_lowercase() != lower);

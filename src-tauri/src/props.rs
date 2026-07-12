@@ -5,7 +5,8 @@
 //! exclusive share access first, retry, then skip with a warning.
 //! Contract: Docs/Features/Clip-Metadata-Interop.md.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 /// One property to mirror onto the file.
 pub enum PropValue {
@@ -41,27 +42,41 @@ pub fn probe_exclusive(path: &Path) -> bool {
         .is_ok()
 }
 
-const PROBE_ATTEMPTS: u32 = 5;
-const PROBE_DELAY_MS: u64 = 1700; // same cadence as the mover's move retries
+pub const PROBE_ATTEMPTS: u32 = 5;
+pub const PROBE_DELAY_MS: u64 = 1700; // same cadence as the mover's move retries
 
-/// Probe-then-write with retries. BLOCKING (sleeps up to ~8.5 s) -- only
-/// call from the blocking pool. Err(msg) is for a warning log, never a toast.
-pub fn write_with_retry(path: &Path, values: &[PropValue]) -> Result<(), String> {
+/// Probe-then-write with retries, RE-RESOLVING the target path before every
+/// probe. BLOCKING (sleeps up to `attempts * delay`) -- only call from the
+/// blocking pool. Err(msg) is for a warning log, never a toast.
+///
+/// The path is re-fetched via `get_path` each attempt so the write follows a
+/// clip that gets moved/renamed (e.g. a G-key sort) while OBS still holds the
+/// original file: without this, every retry would probe the now-moved
+/// creation path and the write would land on nothing. `attempts`/`delay` are
+/// parameters purely so tests can drive tiny counts; production passes
+/// `PROBE_ATTEMPTS` / `PROBE_DELAY_MS`.
+pub fn write_with_retry_resolving(
+    get_path: impl Fn() -> Option<PathBuf>,
+    values: &[PropValue],
+    attempts: u32,
+    delay: Duration,
+) -> Result<(), String> {
     let mut attempt = 0;
     loop {
-        if probe_exclusive(path) {
-            break;
+        let path = get_path()
+            .ok_or_else(|| "clip path no longer resolvable — skipped property write".to_string())?;
+        if probe_exclusive(&path) {
+            return write_properties(&path, values);
         }
         attempt += 1;
-        if attempt >= PROBE_ATTEMPTS {
+        if attempt >= attempts {
             return Err(format!(
                 "file still locked after {} attempts — skipped property write (history.jsonl has the data)",
-                PROBE_ATTEMPTS
+                attempts
             ));
         }
-        std::thread::sleep(std::time::Duration::from_millis(PROBE_DELAY_MS));
+        std::thread::sleep(delay);
     }
-    write_properties(path, values)
 }
 
 /// Build a plain `VT_LPWSTR` PROPVARIANT from a single string (System.Comment).
@@ -224,5 +239,67 @@ mod tests {
     #[test]
     fn test_probe_missing_file_is_false() {
         assert!(!probe_exclusive(std::path::Path::new("C:/nope/missing.mp4")));
+    }
+
+    // The fast-sort race: a clip is created, OBS still holds the file, and the
+    // user G-key-sorts it during the retry window. The resolving helper must
+    // re-fetch the path each attempt and follow the moved clip instead of
+    // burning all its retries probing the now-locked creation path.
+    #[test]
+    fn test_write_with_retry_resolving_follows_moved_path() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let dir = tempfile::tempdir().unwrap();
+        let creation = dir.path().join("creation.mp4");
+        let moved = dir.path().join("moved.mp4");
+        std::fs::write(&creation, b"stub").unwrap();
+        std::fs::write(&moved, b"stub").unwrap();
+
+        // Hold the creation path with NO sharing (OBS mid-write) so its probe
+        // always fails; the moved path is free and probes exclusive.
+        use std::os::windows::fs::OpenOptionsExt;
+        let _hold = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .share_mode(0)
+            .open(&creation)
+            .unwrap();
+
+        let calls = AtomicUsize::new(0);
+        let cp = creation.clone();
+        let mp = moved.clone();
+        let resolve = || {
+            // First two attempts still see the locked creation path; then the
+            // clip is "sorted" and the closure returns the freed moved path.
+            let n = calls.fetch_add(1, Ordering::SeqCst);
+            if n < 2 {
+                Some(cp.clone())
+            } else {
+                Some(mp.clone())
+            }
+        };
+
+        let res = write_with_retry_resolving(
+            resolve,
+            &[PropValue::Game("Test".into())],
+            6,
+            Duration::from_millis(1),
+        );
+
+        // Must have re-resolved past the locked creation path (>=3 fetches).
+        assert!(
+            calls.load(Ordering::SeqCst) >= 3,
+            "helper must re-resolve the path on every attempt"
+        );
+        // It must NOT have exhausted its retries on the locked creation path —
+        // it followed the moved clip. (write_properties itself may still Err on
+        // a stub file that has no real property handler; that's fine, we only
+        // assert the resolving loop reached the moved path.)
+        if let Err(e) = &res {
+            assert!(
+                !e.contains("still locked"),
+                "should have followed the moved path, got: {e}"
+            );
+        }
     }
 }
