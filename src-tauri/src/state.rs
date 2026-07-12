@@ -174,6 +174,51 @@ impl AppStateInner {
 
 pub type AppState = Arc<Mutex<AppStateInner>>;
 
+/// Resolve where the clip created at `creation_path` lives RIGHT NOW, by
+/// identity — never by "most recent clip" guesswork. Used by the deferred
+/// property write so it follows a clip that was G-key-sorted while OBS still
+/// held the file.
+///
+/// 1. If `clip_games` still keys the creation path, the clip hasn't moved.
+/// 2. Otherwise walk the undo stack's move records — the only state that ties
+///    an old path to its new one — following this clip's `from == cur` links
+///    (newest first) until no link matches. At least one hop → that's the clip.
+/// 3. No chain at all → `None`: the caller skips the write and warns.
+///    Skipping is safe; writing another clip's metadata is not.
+pub fn resolve_clip_current_path(
+    clip_games: &HashMap<PathBuf, String>,
+    undo_stack: &[UndoEntry],
+    creation_path: &std::path::Path,
+) -> Option<PathBuf> {
+    if clip_games.contains_key(creation_path) {
+        return Some(creation_path.to_path_buf());
+    }
+    let mut cur = creation_path.to_path_buf();
+    let mut hops = 0usize;
+    // Bound the walk so a pathological from/to cycle can't spin forever.
+    let max_hops: usize = undo_stack.iter().map(|e| e.moves.len()).sum();
+    while hops < max_hops {
+        let next = undo_stack
+            .iter()
+            .rev()
+            .flat_map(|e| e.moves.iter().rev())
+            .find(|m| m.from == cur)
+            .map(|m| m.to.clone());
+        match next {
+            Some(to) => {
+                cur = to;
+                hops += 1;
+            }
+            None => break,
+        }
+    }
+    if hops > 0 {
+        Some(cur)
+    } else {
+        None
+    }
+}
+
 /// Holds the tokio channel senders for background tasks. (The auto-wipe
 /// timer's sender isn't here — no command needs it; the lib.rs event
 /// handlers hold their own clones.)
@@ -213,6 +258,72 @@ mod tests {
         assert_eq!(g1.len(), GKEY_RECENT_MAX);
 
         assert_eq!(s.daily_stats.count(2), 1);
+    }
+
+    // The burst-clipping guard: clip A's creation path was re-keyed away and a
+    // SECOND clip (B) is the newest thing in clip_games — resolution must
+    // follow A's undo-chain identity, or return None. It must NEVER return
+    // clip B's path (that would write A's game into B's metadata).
+    #[test]
+    fn test_resolve_clip_current_path_identity_never_newest_clip() {
+        let a_created = PathBuf::from("C:/clips/clipA.mp4");
+        let a_sorted = PathBuf::from("C:/clips/wins/clipA - clutch.mp4");
+        let b_created = PathBuf::from("C:/clips/clipB.mp4");
+
+        // clip A was sorted (re-keyed to its new path); clip B just arrived.
+        let mut clip_games: HashMap<PathBuf, String> = HashMap::new();
+        clip_games.insert(a_sorted.clone(), "Game A".into());
+        clip_games.insert(b_created.clone(), "Game B".into());
+
+        // Undo stack records A's move by identity.
+        let undo_stack = vec![UndoEntry {
+            moves: vec![UndoMove {
+                from: a_created.clone(),
+                to: a_sorted.clone(),
+            }],
+        }];
+
+        // Follows A's chain — not clip B.
+        let resolved = resolve_clip_current_path(&clip_games, &undo_stack, &a_created);
+        assert_eq!(resolved, Some(a_sorted.clone()));
+
+        // Unmoved clip resolves to its own creation path.
+        assert_eq!(
+            resolve_clip_current_path(&clip_games, &undo_stack, &b_created),
+            Some(b_created.clone())
+        );
+
+        // No clip_games key and no chain link → None (skip, never guess),
+        // even though clip B exists and is "newest".
+        let orphan = PathBuf::from("C:/clips/clipC.mp4");
+        assert_eq!(
+            resolve_clip_current_path(&clip_games, &undo_stack, &orphan),
+            None
+        );
+
+        // Multi-hop: A gets moved again; the chain follows to the final path.
+        let a_final = PathBuf::from("C:/clips/best/clipA - clutch.mp4");
+        let undo_stack2 = vec![
+            UndoEntry {
+                moves: vec![UndoMove {
+                    from: a_created.clone(),
+                    to: a_sorted.clone(),
+                }],
+            },
+            UndoEntry {
+                moves: vec![UndoMove {
+                    from: a_sorted.clone(),
+                    to: a_final.clone(),
+                }],
+            },
+        ];
+        let mut cg2: HashMap<PathBuf, String> = HashMap::new();
+        cg2.insert(a_final.clone(), "Game A".into());
+        cg2.insert(b_created.clone(), "Game B".into());
+        assert_eq!(
+            resolve_clip_current_path(&cg2, &undo_stack2, &a_created),
+            Some(a_final)
+        );
     }
 
     #[test]

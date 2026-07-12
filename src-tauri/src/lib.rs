@@ -831,19 +831,15 @@ async fn handle_file_created(
                     // ONLY to read the path, then drop before probing/sleeping.
                     let resolve = || -> Option<std::path::PathBuf> {
                         let s = state_for_props.lock().ok()?;
-                        // Unmoved: the creation path is still keyed in the
-                        // session map, so use it directly.
-                        if s.clip_games.contains_key(&creation_path) {
-                            return Some(creation_path.clone());
-                        }
-                        // Moved/renamed during the retry window — follow the
-                        // active clip (best-effort; current_file tracks the
-                        // most-recent clip, which in the fast-sort flow is the
-                        // one just sorted).
-                        if let Some(cf) = &s.current_file {
-                            return Some(cf.moved_path.clone().unwrap_or_else(|| cf.path.clone()));
-                        }
-                        Some(creation_path.clone())
+                        // Identity-preserving only: creation path if unmoved,
+                        // else this clip's own move chain from the undo stack,
+                        // else None (skip + warn). Never "the newest clip" —
+                        // guessing could stamp another clip's metadata.
+                        state::resolve_clip_current_path(
+                            &s.clip_games,
+                            &s.undo_stack,
+                            &creation_path,
+                        )
                     };
                     if let Err(msg) = props::write_with_retry_resolving(
                         resolve,
