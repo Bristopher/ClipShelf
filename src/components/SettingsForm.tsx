@@ -584,11 +584,163 @@ export function SettingsForm({ config, onConfigChange }: SettingsFormProps) {
 
       <Separator />
 
+      <section className="space-y-3">
+        <h3 className="text-sm font-semibold">Game detection</h3>
+        <div className="flex items-center justify-between">
+          <Label className="text-xs">Game detection</Label>
+          <Switch
+            checked={config.game_detection_enabled}
+            onCheckedChange={(v) => update({ game_detection_enabled: v })}
+          />
+        </div>
+        <div className="flex items-center justify-between">
+          <div className="pr-2">
+            <Label className="text-xs">
+              Write game/rating/description into file properties (visible in
+              Explorer)
+            </Label>
+          </div>
+          <Switch
+            checked={config.write_file_properties}
+            disabled={!config.game_detection_enabled}
+            onCheckedChange={(v) => update({ write_file_properties: v })}
+          />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Day starts at (hour, 0–23)</Label>
+          <Input
+            type="number"
+            min={0}
+            max={23}
+            value={config.day_rollover_hour}
+            className="text-xs h-8"
+            onChange={(e) =>
+              update({
+                day_rollover_hour: Math.min(
+                  23,
+                  Math.max(0, Number(e.target.value) || 0),
+                ),
+              })
+            }
+          />
+          <p className="text-[10px] text-t-muted">
+            History and daily stats roll over at this hour — default 4 AM for
+            late-night sessions.
+          </p>
+        </div>
+        <GameOverridesEditor config={config} onConfigChange={onConfigChange} />
+      </section>
+
+      <Separator />
+
       <section className="pt-1 pb-2">
         <p className="text-[11px] text-t-muted text-center">
           GKey Mover {version ? `v${version}` : ""}
         </p>
       </section>
+    </div>
+  );
+}
+
+/** Editable table of exe -> display-name corrections that always win over detection. */
+function GameOverridesEditor({ config, onConfigChange }: SettingsFormProps) {
+  const [newExe, setNewExe] = useState("");
+  const [newName, setNewName] = useState("");
+
+  const update = (partial: Partial<AppConfig>) => {
+    onConfigChange({ ...config, ...partial });
+  };
+
+  const overrides = config.game_overrides ?? [];
+
+  const setOverrideName = (exe: string, name: string) => {
+    update({
+      game_overrides: overrides.map((o) =>
+        o.exe.toLowerCase() === exe.toLowerCase() ? { ...o, name } : o,
+      ),
+    });
+  };
+
+  const removeOverride = (exe: string) => {
+    update({
+      game_overrides: overrides.filter(
+        (o) => o.exe.toLowerCase() !== exe.toLowerCase(),
+      ),
+    });
+  };
+
+  const addOverride = () => {
+    const exe = newExe.trim();
+    const name = newName.trim();
+    if (!exe || !name) return;
+    const existingIdx = overrides.findIndex(
+      (o) => o.exe.toLowerCase() === exe.toLowerCase(),
+    );
+    const next =
+      existingIdx >= 0
+        ? overrides.map((o, i) => (i === existingIdx ? { exe, name } : o))
+        : [...overrides, { exe, name }];
+    update({ game_overrides: next });
+    setNewExe("");
+    setNewName("");
+  };
+
+  return (
+    <div className="space-y-1.5">
+      <Label className="text-xs">Overrides</Label>
+      {overrides.length > 0 && (
+        <div className="space-y-1.5">
+          {overrides.map((o) => (
+            <div key={o.exe} className="flex gap-2 items-center">
+              <Input
+                value={o.exe}
+                readOnly
+                className="text-xs h-8 flex-1 text-t-muted"
+              />
+              <Input
+                value={o.name}
+                className="text-xs h-8 flex-1"
+                onChange={(e) => setOverrideName(o.exe, e.target.value)}
+              />
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 shrink-0"
+                title="Remove override"
+                onClick={() => removeOverride(o.exe)}
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="flex gap-2 items-center">
+        <Input
+          value={newExe}
+          placeholder="game.exe"
+          className="text-xs h-8 flex-1"
+          onChange={(e) => setNewExe(e.target.value)}
+        />
+        <Input
+          value={newName}
+          placeholder="Display name"
+          className="text-xs h-8 flex-1"
+          onChange={(e) => setNewName(e.target.value)}
+        />
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8 text-xs shrink-0"
+          onClick={addOverride}
+        >
+          Add
+        </Button>
+      </div>
+      <p className="text-[10px] text-t-muted">
+        When a game is detected wrong, corrections you save here (or via
+        Remember) always win.
+      </p>
     </div>
   );
 }
