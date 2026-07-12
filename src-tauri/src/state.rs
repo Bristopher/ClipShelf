@@ -86,6 +86,15 @@ pub struct AppStateInner {
     /// Persistent "today" move counts per G-key (gkey_stats.toml, rolls
     /// over at local midnight). Saved after each move, outside the lock.
     pub daily_stats: crate::stats::DailyStats,
+
+    /// Game snapshot captured at the save-clip-bind press, consumed by the
+    /// next FileCreated. Age-gated so a stale press can't mislabel a later
+    /// clip that arrived by other means.
+    pub pending_game: Option<crate::gamedetect::GameSnapshot>,
+
+    /// Session map: clip's CURRENT path → detected game. Kept in sync on
+    /// move/rename so rate/label events after sorting still carry the game.
+    pub clip_games: HashMap<PathBuf, String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -123,6 +132,23 @@ impl AppStateInner {
             last_obs_status: "disabled".to_string(),
             gkey_recent: HashMap::new(),
             daily_stats,
+            pending_game: None,
+            clip_games: HashMap::new(),
+        }
+    }
+
+    /// Consume the pending game snapshot if it's fresh enough. A snapshot
+    /// older than `max_age` is dropped (a stale save-press must not mislabel
+    /// a clip that arrived much later by another path).
+    pub fn take_pending_game(
+        &mut self,
+        max_age: std::time::Duration,
+    ) -> Option<crate::gamedetect::GameSnapshot> {
+        let snap = self.pending_game.take()?;
+        if snap.taken_at.elapsed().unwrap_or_default() <= max_age {
+            Some(snap)
+        } else {
+            None
         }
     }
 
@@ -187,5 +213,28 @@ mod tests {
         assert_eq!(g1.len(), GKEY_RECENT_MAX);
 
         assert_eq!(s.daily_stats.count(2), 1);
+    }
+
+    #[test]
+    fn test_take_pending_game_respects_age() {
+        use std::time::{Duration, SystemTime};
+        let mut s = AppStateInner::new(AppConfig::default(), PathBuf::new());
+        assert!(s.take_pending_game(Duration::from_secs(30)).is_none());
+
+        s.pending_game = Some(crate::gamedetect::GameSnapshot {
+            label: "Counter-Strike 2".into(),
+            exe_stem: "cs2".into(),
+            taken_at: SystemTime::now(),
+        });
+        let snap = s.take_pending_game(Duration::from_secs(30)).expect("fresh snapshot");
+        assert_eq!(snap.label, "Counter-Strike 2");
+        assert!(s.pending_game.is_none(), "take consumes");
+
+        s.pending_game = Some(crate::gamedetect::GameSnapshot {
+            label: "Old".into(),
+            exe_stem: "old".into(),
+            taken_at: SystemTime::now() - Duration::from_secs(120),
+        });
+        assert!(s.take_pending_game(Duration::from_secs(30)).is_none(), "stale is discarded");
     }
 }

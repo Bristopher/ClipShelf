@@ -42,6 +42,9 @@ pub struct FileCreatedPayload {
     pub timestamp: String,
     pub size_mb: f64,
     pub is_warning: bool,
+    /// Detected game/app label for the clip, if game detection produced one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub game: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -359,6 +359,24 @@ pub fn run() {
                                     let _ = app_handle
                                         .emit("calibration-armed", serde_json::json!({}));
                                 }
+                                // Game detection: the user is in-game at this
+                                // exact instant — snapshot the foreground app
+                                // for the clip about to arrive. Win32 calls are
+                                // cheap but not free; do them off the async loop.
+                                {
+                                    let st = state.clone();
+                                    tauri::async_runtime::spawn_blocking(move || {
+                                        let (enabled, overrides) = {
+                                            let s = st.lock().unwrap();
+                                            (s.config.game_detection_enabled, s.config.game_overrides.clone())
+                                        };
+                                        if enabled {
+                                            let snap = gamedetect::snapshot_foreground(&overrides);
+                                            let mut s = st.lock().unwrap();
+                                            s.pending_game = snap;
+                                        }
+                                    });
+                                }
                                 spawn_save_clip_health_check(
                                     app_handle.clone(),
                                     state.clone(),
@@ -760,6 +778,59 @@ async fn handle_file_created(
     if let Some(payload) = calibration_event {
         let _ = app.emit("calibration-event", payload);
     }
+
+    // Game detection: prefer the snapshot from the save-press instant;
+    // fall back to "what's focused right now" for clips that arrived
+    // without a hotkey press (watcher-only / OBS event).
+    let game: Option<String> = {
+        let taken = {
+            let mut s = state.lock().unwrap();
+            s.take_pending_game(std::time::Duration::from_secs(30))
+        };
+        match taken {
+            Some(snap) => Some(snap.label),
+            None if config.game_detection_enabled => {
+                let overrides = config.game_overrides.clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    gamedetect::snapshot_foreground(&overrides).map(|s| s.label)
+                })
+                .await
+                .ok()
+                .flatten()
+            }
+            None => None,
+        }
+    };
+    let (config_path, hist_event) = {
+        let mut s = state.lock().unwrap();
+        if let Some(g) = &game {
+            s.clip_games.insert(path.clone(), g.clone());
+        }
+        let mut e = history::HistoryEvent::new("created", &path, "app");
+        if let Some(g) = &game {
+            e = e.with_game(g);
+        }
+        (s.config_path.clone(), e)
+    };
+    let hist_path = history::history_path(&config_path);
+    let write_props = config.write_file_properties;
+    {
+        let path_for_props = path.clone();
+        let game_for_props = game.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            history::append(&hist_path, &hist_event);
+            if write_props {
+                if let Some(g) = game_for_props {
+                    if let Err(msg) =
+                        props::write_with_retry(&path_for_props, &[props::PropValue::Game(g)])
+                    {
+                        eprintln!("props: {}", msg);
+                    }
+                }
+            }
+        });
+    }
+
     {
         let mut s = state.lock().unwrap();
 
@@ -769,7 +840,7 @@ async fn handle_file_created(
         } else {
             LogLevel::Info
         };
-        let msg = if is_warning {
+        let mut msg = if is_warning {
             format!(
                 "New file: {} ({:.1}MB - possible black screen)",
                 filename, size_mb
@@ -777,6 +848,9 @@ async fn handle_file_created(
         } else {
             format!("New file: {} ({:.1}MB)", filename, size_mb)
         };
+        if let Some(g) = &game {
+            msg.push_str(&format!(" — {}", g));
+        }
         let entry = s.logger.log_with_path(
             level,
             msg,
@@ -801,6 +875,7 @@ async fn handle_file_created(
             timestamp,
             size_mb,
             is_warning,
+            game: game.clone(),
         },
     );
 

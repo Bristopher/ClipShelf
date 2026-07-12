@@ -162,6 +162,7 @@ export interface FileCreatedEvent {
   timestamp: string;
   sizeMb: number;
   isWarning: boolean;
+  game?: string | null;
 }
 
 export interface FileMovedEvent {

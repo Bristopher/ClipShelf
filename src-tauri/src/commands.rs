@@ -164,7 +164,7 @@ pub fn do_press_gkey(app: &AppHandle, state: &AppState, key: u8) {
     let config = s.config.clone();
     drop(s); // Release lock before file operations
 
-    if let Some(mv) = move_file_with_key(app, state, &file_path, key, &gkey_label, &config) {
+    if let Some(mv) = move_file_with_key(app, state, &file_path, key, &gkey_label, &config, "hotkey") {
         if let Ok(mut s) = state.lock() {
             s.push_undo(crate::state::UndoEntry { moves: vec![mv] });
         }
@@ -185,6 +185,7 @@ fn move_file_with_key(
     key: u8,
     log_label: &str,
     config: &AppConfig,
+    source: &str,
 ) -> Option<crate::state::UndoMove> {
     match mover::move_or_rename_file(file_path, key, config) {
         Ok(result) => {
@@ -194,6 +195,12 @@ fn move_file_with_key(
                 moved_path: None,
             });
             s.record_gkey_move(key, result.new_path.clone());
+            // Carry the clip's detected game across the move so later
+            // rate/label/undo events still know it. Re-key the session map.
+            let game = s.clip_games.remove(file_path);
+            if let Some(g) = &game {
+                s.clip_games.insert(result.new_path.clone(), g.clone());
+            }
             let mode = if config.disable_file_movesorting {
                 "renamed"
             } else {
@@ -227,8 +234,17 @@ fn move_file_with_key(
             // Persist the bumped daily count — disk write outside the lock.
             let daily = s.daily_stats.clone();
             let stats_path = crate::stats::stats_path(&s.config_path);
+            let config_path = s.config_path.clone();
             drop(s);
             crate::stats::save(&stats_path, &daily);
+            // History: record the move (best-effort, lock already dropped).
+            let mut ev = crate::history::HistoryEvent::new("moved", &result.new_path, source)
+                .with_old_path(file_path)
+                .with_key(key);
+            if let Some(g) = &game {
+                ev = ev.with_game(g);
+            }
+            crate::history::append(&crate::history::history_path(&config_path), &ev);
             if config.move_sound_enabled {
                 let resource_dir = app.path().resource_dir().unwrap_or_default();
                 sound::play_move_beep(&resource_dir);
@@ -301,7 +317,7 @@ pub async fn drop_files_to_gkey(
                 failed += 1;
                 continue;
             }
-            match move_file_with_key(&app, &st, &file_path, key, &label, &config) {
+            match move_file_with_key(&app, &st, &file_path, key, &label, &config, "drop") {
                 Some(mv) => moves.push(mv),
                 None => failed += 1,
             }
@@ -464,6 +480,11 @@ fn do_rename_file(app: &AppHandle, state: &AppState, text: &str) {
                 path: result.new_path.clone(),
                 moved_path: Some(result.new_path.clone()),
             });
+            // Carry the clip's detected game across the rename.
+            let game = s.clip_games.remove(&file_path);
+            if let Some(g) = &game {
+                s.clip_games.insert(result.new_path.clone(), g.clone());
+            }
             s.push_undo(crate::state::UndoEntry {
                 moves: vec![crate::state::UndoMove {
                     from: result.original_path.clone(),
@@ -508,6 +529,13 @@ fn do_rename_file(app: &AppHandle, state: &AppState, text: &str) {
                 log::warn!("Failed to persist rename MRU: {}", e);
             }
             let _ = app.emit("config-changed", &cfg);
+            // History: record the rename (best-effort, lock already dropped).
+            let mut ev = crate::history::HistoryEvent::new("renamed", &result.new_path, "app")
+                .with_old_path(&file_path);
+            if let Some(g) = &game {
+                ev = ev.with_game(g);
+            }
+            crate::history::append(&crate::history::history_path(&cfg_path), &ev);
         }
         Err(e) => {
             let Ok(mut s) = state.lock() else { return };
@@ -592,6 +620,20 @@ pub fn do_undo(app: &AppHandle, state: &AppState) {
                         undone_name, restored_name
                     ));
                 }
+                // Carry the game back to the restored path, then record the
+                // undo in history (best-effort, after the lock is dropped).
+                let game = s.clip_games.remove(&mv.to);
+                if let Some(g) = &game {
+                    s.clip_games.insert(mv.from.clone(), g.clone());
+                }
+                let config_path = s.config_path.clone();
+                drop(s);
+                let mut ev = crate::history::HistoryEvent::new("undone", &mv.from, "app")
+                    .with_old_path(&mv.to);
+                if let Some(g) = &game {
+                    ev = ev.with_game(g);
+                }
+                crate::history::append(&crate::history::history_path(&config_path), &ev);
             }
             Err(e) => {
                 let Ok(mut s) = state.lock() else { return };
