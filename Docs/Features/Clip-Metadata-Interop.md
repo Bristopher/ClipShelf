@@ -103,8 +103,8 @@ const props = JSON.parse(out);
 
 ## 3. `history.jsonl` — the full event log
 
-Location: next to the app config —
-`%APPDATA%\com.cbuzi.gkey-mover-v2\history.jsonl` (same folder as `config.toml`).
+Location: next to the app config, which lives **beside the GKey Mover executable** —
+`<install folder>\history.jsonl` (same folder as `gkey_config.toml` and `gkey_stats.toml`).
 
 Append-only JSON Lines, one event per line, kept forever. Fields absent when not
 applicable; **skip unparseable lines** when reading (the app does too).
