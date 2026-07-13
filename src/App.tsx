@@ -276,6 +276,7 @@ function App() {
             mode={config.disable_file_movesorting ? "rename" : "sort"}
             autoWipe={config.auto_wipe_enabled}
             obsEnabled={config.obs_websocket_enabled}
+            dayRolloverHour={config.day_rollover_hour}
             onAutoWipeChange={(v) => updateConfig({ auto_wipe_enabled: v }).then(setConfig)}
             onWipe={clear}
             onRestore={restore}

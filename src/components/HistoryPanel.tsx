@@ -1,0 +1,315 @@
+import { useEffect, useRef, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { History } from "lucide-react";
+import { getHistory, editHistoryGame, restoreLog, revealInExplorer } from "@/lib/commands";
+import { EntryContextMenu, type ContextMenuState } from "@/components/EntryContextMenu";
+import { errorMessage, toastError, toastSuccess } from "@/lib/toast";
+import type { HistoryEntry, LogEntry } from "@/types";
+
+interface HistoryPanelButtonProps {
+  onRestore: (entries: LogEntry[]) => void;
+  dayRolloverHour: number;
+}
+
+type ViewMode = "today" | "all";
+
+const EVENT_BADGES: Record<string, { label: string; className: string }> = {
+  created: { label: "New", className: "text-green-400" },
+  moved: { label: "Moved", className: "text-purple-400" },
+  renamed: { label: "Renamed", className: "text-purple-400" },
+  undone: { label: "Undone", className: "text-amber-400" },
+  game_edited: { label: "Game edited", className: "text-blue-400" },
+  rated: { label: "Rated", className: "text-t-muted" },
+  labeled: { label: "Labeled", className: "text-t-muted" },
+  described: { label: "Described", className: "text-t-muted" },
+};
+
+function badgeFor(event: string) {
+  return EVENT_BADGES[event] ?? { label: event, className: "text-t-muted" };
+}
+
+/** Last path segment of the parent directory — the destination folder name for a moved row. */
+function destFolder(path: string): string {
+  const parent = path.replace(/[\\/][^\\/]*$/, "");
+  const seg = parent.match(/[^\\/]+$/);
+  return seg ? seg[0] : "";
+}
+
+function fmtTime(ts: string): string {
+  const d = new Date(ts);
+  return Number.isNaN(d.getTime()) ? ts : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function fmtDay(day: string): string {
+  const d = new Date(`${day}T00:00:00`);
+  return Number.isNaN(d.getTime())
+    ? day
+    : d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
+}
+
+/** Row key unique enough for React + edit-state tracking (ts+path is unique per event). */
+function rowKey(e: HistoryEntry): string {
+  return `${e.ts}|${e.path}`;
+}
+
+/** Group entries by `game ?? "No game detected"`, groups sorted by count desc. */
+function groupByGame(entries: HistoryEntry[]): [string, HistoryEntry[]][] {
+  const map = new Map<string, HistoryEntry[]>();
+  for (const e of entries) {
+    const key = e.game ?? "No game detected";
+    const bucket = map.get(key);
+    if (bucket) bucket.push(e);
+    else map.set(key, [e]);
+  }
+  return [...map.entries()].sort((a, b) => b[1].length - a[1].length);
+}
+
+function groupByDay(entries: HistoryEntry[]): [string, HistoryEntry[]][] {
+  const map = new Map<string, HistoryEntry[]>();
+  for (const e of entries) {
+    const bucket = map.get(e.day);
+    if (bucket) bucket.push(e);
+    else map.set(e.day, [e]);
+  }
+  return [...map.entries()].sort((a, b) => (a[0] < b[0] ? 1 : a[0] > b[0] ? -1 : 0));
+}
+
+/**
+ * History button + popover — the entry point for the History panel. Mirrors
+ * BottomBar's DiagnosticsButton popover idiom (button + absolutely-positioned
+ * panel, click-outside + Esc close, fetch on open), but wider and with a
+ * Today/All toggle. Also carries the old Restore-log-display action, moved
+ * into the footer.
+ */
+export function HistoryPanelButton({ onRestore, dayRolloverHour }: HistoryPanelButtonProps) {
+  const [open, setOpen] = useState(false);
+  const [view, setView] = useState<ViewMode>("today");
+  const [entries, setEntries] = useState<HistoryEntry[] | null>(null);
+  const [menu, setMenu] = useState<ContextMenuState | null>(null);
+  const [editingKey, setEditingKey] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState("");
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  const load = (full: boolean) => {
+    getHistory(full)
+      .then(setEntries)
+      .catch((e) => toastError(errorMessage(e)));
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    load(view === "all");
+    const onDown = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const switchView = (v: ViewMode) => {
+    setView(v);
+    setEditingKey(null);
+    load(v === "all");
+  };
+
+  const handleRestore = () => {
+    restoreLog()
+      .then(onRestore)
+      .catch((e) => toastError(`Restore failed: ${errorMessage(e)}`));
+  };
+
+  const startEdit = (e: HistoryEntry) => {
+    setEditingKey(rowKey(e));
+    setEditValue(e.game ?? "");
+  };
+
+  const saveEdit = (e: HistoryEntry, remember: boolean) => {
+    const game = editValue.trim();
+    if (!game) {
+      toastError("Game name cannot be empty");
+      return;
+    }
+    editHistoryGame(e.path, game, e.exe ?? null, remember)
+      .then(() => {
+        toastSuccess("Game updated");
+        setEditingKey(null);
+        load(view === "all");
+      })
+      .catch((err) => toastError(errorMessage(err)));
+  };
+
+  const renderRow = (e: HistoryEntry) => {
+    const key = rowKey(e);
+    const badge = badgeFor(e.event);
+    const editing = editingKey === key;
+    return (
+      <div key={key} className="rounded px-1.5 py-1 hover:bg-hover">
+        <div
+          className="flex items-center gap-2 text-xs cursor-pointer"
+          onClick={() => revealInExplorer(e.path).catch((err) => toastError(errorMessage(err)))}
+          onContextMenu={(ev) => {
+            ev.preventDefault();
+            setMenu({ x: ev.clientX, y: ev.clientY, path: e.path });
+          }}
+        >
+          <span className={`shrink-0 w-20 ${badge.className}`}>{badge.label}</span>
+          <span className="flex-1 min-w-0 truncate text-t-text" title={e.path}>
+            {e.filename}
+          </span>
+          {e.event === "moved" && (
+            <span className="shrink-0 text-t-muted truncate max-w-[8rem]" title={destFolder(e.path)}>
+              → {destFolder(e.path)}
+            </span>
+          )}
+          <span className="shrink-0 text-t-muted tabular-nums">{fmtTime(e.ts)}</span>
+        </div>
+        {editing && (
+          <div
+            className="flex items-center gap-1.5 mt-1 pl-[5.5rem]"
+            onClick={(ev) => ev.stopPropagation()}
+          >
+            <Input
+              autoFocus
+              value={editValue}
+              onChange={(ev) => setEditValue(ev.target.value)}
+              onKeyDown={(ev) => {
+                if (ev.key === "Escape") setEditingKey(null);
+                if (ev.key === "Enter") saveEdit(e, false);
+              }}
+              className="h-6 text-xs flex-1 min-w-0"
+              placeholder="Game name"
+            />
+            <Button
+              size="xs"
+              variant="outline"
+              className="h-6 text-[10px]"
+              onClick={() => saveEdit(e, false)}
+            >
+              Save
+            </Button>
+            <Button
+              size="xs"
+              variant="outline"
+              className="h-6 text-[10px]"
+              disabled={!e.exe}
+              title={e.exe ? undefined : "No exe recorded for this clip"}
+              onClick={() => saveEdit(e, true)}
+            >
+              Save &amp; Remember
+            </Button>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderGameGroups = (list: HistoryEntry[]) =>
+    groupByGame(list).map(([game, rows]) => (
+      <div key={game} className="mb-2">
+        <p className="text-[10px] font-semibold text-t-muted px-1.5 py-0.5">
+          {game} — {rows.length} clip{rows.length === 1 ? "" : "s"}
+        </p>
+        <div className="space-y-0.5">{rows.map(renderRow)}</div>
+      </div>
+    ));
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-7 text-xs gap-1"
+        title="History"
+        aria-label="History"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <History className="h-3 w-3" />
+        History
+      </Button>
+      {open && (
+        <div className="absolute bottom-full right-0 mb-2 z-50 w-96 max-h-[70vh] flex flex-col rounded-md border border-t-border bg-panel shadow-lg animate-in fade-in-0 zoom-in-95 duration-150">
+          <div className="flex items-center justify-between px-3 pt-3 pb-2">
+            <p className="text-[11px] font-semibold text-t-text">History</p>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-t-muted">{entries?.length ?? 0} entries</span>
+              <div className="flex items-center rounded border border-t-border overflow-hidden">
+                {(["today", "all"] as const).map((v) => (
+                  <button
+                    key={v}
+                    onClick={() => switchView(v)}
+                    className={`px-2 py-0.5 text-[10px] capitalize ${
+                      view === v ? "bg-hover text-t-text" : "text-t-muted hover:text-t-text"
+                    }`}
+                  >
+                    {v}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex-1 min-h-0 overflow-y-auto px-2">
+            {entries === null ? (
+              <p className="text-[10px] text-t-muted px-1.5 py-2">Loading...</p>
+            ) : entries.length === 0 ? (
+              <p className="text-[10px] text-t-muted px-1.5 py-2 italic">
+                {view === "today" ? "No clips yet today." : "No history yet."}
+              </p>
+            ) : view === "today" ? (
+              renderGameGroups(entries)
+            ) : (
+              groupByDay(entries).map(([day, rows]) => (
+                <div key={day} className="mb-3">
+                  <p className="text-[10px] font-semibold text-t-text px-1.5 py-0.5 border-b border-t-border">
+                    {fmtDay(day)} — {rows.length} clip{rows.length === 1 ? "" : "s"}
+                  </p>
+                  {renderGameGroups(rows)}
+                </div>
+              ))
+            )}
+          </div>
+
+          <div className="px-3 py-2 border-t border-t-border space-y-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 text-[10px] w-full"
+              onClick={handleRestore}
+            >
+              Restore log display
+            </Button>
+            <p className="text-[10px] text-t-muted text-center">
+              Today starts at {dayRolloverHour}:00 (Settings)
+            </p>
+          </div>
+        </div>
+      )}
+      {menu && (
+        <EntryContextMenu
+          menu={menu}
+          onClose={() => setMenu(null)}
+          extraItems={[
+            {
+              label: "Edit game…",
+              action: () => {
+                const e = entries?.find((x) => x.path === menu.path);
+                if (e) startEdit(e);
+              },
+            },
+          ]}
+        />
+      )}
+    </div>
+  );
+}

@@ -4,7 +4,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
 import { revealInExplorer, openFolder } from "@/lib/commands";
 import { useWatcherStatus } from "@/hooks/useWatcherStatus";
-import { errorMessage, toastError, toastSuccess } from "@/lib/toast";
+import { errorMessage, toastError } from "@/lib/toast";
+import { EntryContextMenu, type ContextMenuState } from "@/components/EntryContextMenu";
 import type { AppConfig, LogEntry } from "@/types";
 
 function categoryColor(category: string, level: string): string {
@@ -28,12 +29,6 @@ interface EventLogProps {
   onCloseFilter: () => void;
 }
 
-interface MenuState {
-  x: number;
-  y: number;
-  entry: LogEntry;
-}
-
 /**
  * Log entries that reference a file are clickable:
  *   Click        → reveal in Explorer (file selected)
@@ -49,7 +44,7 @@ export function EventLog({ entries, config, filterOpen, onCloseFilter }: EventLo
   const hoverTimer = useRef<number | null>(null);
   const [query, setQuery] = useState("");
   const [level, setLevel] = useState<LevelFilter>("all");
-  const [menu, setMenu] = useState<MenuState | null>(null);
+  const [menu, setMenu] = useState<ContextMenuState | null>(null);
   const filterInputRef = useRef<HTMLInputElement>(null);
   // Only auto-scroll while the user is already at (or near) the bottom —
   // a new entry shouldn't yank them down mid-read of an older one.
@@ -148,7 +143,7 @@ export function EventLog({ entries, config, filterOpen, onCloseFilter }: EventLo
     if (!entry.path) return;
     e.preventDefault();
     onLeave();
-    setMenu({ x: e.clientX, y: e.clientY, entry });
+    setMenu({ x: e.clientX, y: e.clientY, path: entry.path! });
   };
 
   return (
@@ -270,54 +265,6 @@ function EmptyState({ config }: { config: AppConfig }) {
           No clips folder configured — open Settings to pick one.
         </p>
       )}
-    </div>
-  );
-}
-
-function EntryContextMenu({ menu, onClose }: { menu: MenuState; onClose: () => void }) {
-  const path = menu.entry.path!;
-  const filename = path.replace(/^.*[\\/]/, "");
-
-  const copy = (text: string, what: string) => {
-    navigator.clipboard
-      .writeText(text)
-      .then(() => toastSuccess(`${what} copied`))
-      .catch((e) => toastError(`Copy failed: ${errorMessage(e)}`));
-  };
-
-  const items: { label: string; action: () => void }[] = [
-    { label: "Reveal in Explorer", action: () => revealInExplorer(path).catch((e) => toastError(errorMessage(e))) },
-    { label: "Play clip", action: () => openFolder(path).catch((e) => toastError(errorMessage(e))) },
-    { label: "Copy path", action: () => copy(path, "Path") },
-    { label: "Copy filename", action: () => copy(filename, "Filename") },
-  ];
-
-  // Keep the menu on-screen near the bottom edge.
-  const style: React.CSSProperties = {
-    left: Math.min(menu.x, window.innerWidth - 180),
-    top: Math.min(menu.y, window.innerHeight - items.length * 28 - 12),
-  };
-
-  return (
-    <div
-      style={style}
-      className="fixed z-50 w-44 rounded-md border border-t-border bg-panel shadow-lg py-1 animate-in fade-in-0 zoom-in-95 duration-100"
-      // mousedown-outside closes the menu — swallow it inside so item
-      // clicks still land.
-      onMouseDown={(e) => e.stopPropagation()}
-    >
-      {items.map((item) => (
-        <button
-          key={item.label}
-          onClick={() => {
-            item.action();
-            onClose();
-          }}
-          className="block w-full text-left px-3 py-1 text-xs text-t-text hover:bg-hover"
-        >
-          {item.label}
-        </button>
-      ))}
     </div>
   );
 }

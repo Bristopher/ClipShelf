@@ -14,7 +14,6 @@ import {
 } from "lucide-react";
 import {
   wipeLog,
-  restoreLog,
   toggleCountUp,
   undoLastAction,
   setWatchPaused,
@@ -27,6 +26,7 @@ import { useCountUp } from "@/hooks/useCountUp";
 import { useWatcherStatus } from "@/hooks/useWatcherStatus";
 import { useObsStatus } from "@/hooks/useObsStatus";
 import { errorMessage, toastError, toastInfo } from "@/lib/toast";
+import { HistoryPanelButton } from "@/components/HistoryPanel";
 import type { Diagnostics, LogEntry } from "@/types";
 
 interface BottomBarProps {
@@ -34,6 +34,8 @@ interface BottomBarProps {
   autoWipe: boolean;
   /** Show the OBS WebSocket connection dot (only when the integration is on). */
   obsEnabled: boolean;
+  /** History panel footer hint: "Today starts at {hour}:00 (Settings)". */
+  dayRolloverHour: number;
   onAutoWipeChange: (value: boolean) => void;
   onWipe: () => void;
   onRestore: (entries: LogEntry[]) => void;
@@ -74,6 +76,7 @@ export function BottomBar({
   mode,
   autoWipe,
   obsEnabled,
+  dayRolloverHour,
   onAutoWipeChange,
   onWipe,
   onRestore,
@@ -91,15 +94,6 @@ export function BottomBar({
       onWipe();
     } catch (e) {
       toastError(`Wipe failed: ${errorMessage(e)}`);
-    }
-  };
-
-  const handleRestore = async () => {
-    try {
-      const restored = await restoreLog();
-      onRestore(restored);
-    } catch (e) {
-      toastError(`Restore failed: ${errorMessage(e)}`);
     }
   };
 
@@ -126,9 +120,7 @@ export function BottomBar({
       <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={handleWipe}>
         Wipe
       </Button>
-      <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={handleRestore}>
-        Restore
-      </Button>
+      <HistoryPanelButton onRestore={onRestore} dayRolloverHour={dayRolloverHour} />
       <Button
         variant="ghost"
         size="sm"

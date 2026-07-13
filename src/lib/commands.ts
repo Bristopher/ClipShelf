@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AppConfig, Diagnostics, GKeyStat, LogEntry, Theme } from "../types";
+import type { AppConfig, Diagnostics, GKeyStat, HistoryEntry, LogEntry, Theme } from "../types";
 
 export const getConfig = () => invoke<AppConfig>("get_config");
 export const updateConfig = (partial: Partial<AppConfig>) => invoke<AppConfig>("update_config", { partial });
@@ -39,3 +39,6 @@ export const getGkeyStats = () => invoke<GKeyStat[]>("get_gkey_stats");
 export const getDiagnostics = () => invoke<Diagnostics>("get_diagnostics");
 export const testObsConnection = (password: string) =>
   invoke<void>("test_obs_connection", { password });
+export const getHistory = (full: boolean) => invoke<HistoryEntry[]>("get_history", { full });
+export const editHistoryGame = (path: string, game: string, exe: string | null, remember: boolean) =>
+  invoke<void>("edit_history_game", { path, game, exe, remember });

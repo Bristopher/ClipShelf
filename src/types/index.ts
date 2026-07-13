@@ -171,3 +171,23 @@ export interface FileMovedEvent {
   tag: string;
   mode: string;
 }
+
+/** One row in the History panel — mirrors the Rust HistoryEntryPayload. */
+export interface HistoryEntry {
+  ts: string;
+  /** created | moved | renamed | rated | labeled | described | game_edited | undone */
+  event: string;
+  path: string;
+  oldPath?: string;
+  game?: string;
+  exe?: string;
+  key?: number;
+  rating?: number;
+  label?: string;
+  description?: string;
+  /** hotkey | overlay | drop | app */
+  source: string;
+  /** Logical day bucket ("YYYY-MM-DD"), precomputed by the backend. */
+  day: string;
+  filename: string;
+}
