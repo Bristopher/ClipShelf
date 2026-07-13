@@ -1,5 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AppConfig, Diagnostics, GKeyStat, HistoryEntry, LogEntry, Theme } from "../types";
+import type {
+  AppConfig,
+  Diagnostics,
+  GKeyStat,
+  HistoryEntry,
+  LogEntry,
+  OverlayContext,
+  Theme,
+} from "../types";
 
 export const getConfig = () => invoke<AppConfig>("get_config");
 export const updateConfig = (partial: Partial<AppConfig>) => invoke<AppConfig>("update_config", { partial });
@@ -42,3 +50,17 @@ export const testObsConnection = (password: string) =>
 export const getHistory = (full: boolean) => invoke<HistoryEntry[]>("get_history", { full });
 export const editHistoryGame = (path: string, game: string, exe: string | null, remember: boolean) =>
   invoke<void>("edit_history_game", { path, game, exe, remember });
+
+// --- Overlay (Task 6) ---
+export const overlayGetContext = () => invoke<OverlayContext>("overlay_get_context");
+export const overlaySort = (key: number) => invoke<void>("overlay_sort", { key });
+export const overlayRate = (stars: number) => invoke<void>("overlay_rate", { stars });
+export const overlayLabel = (label: string) => invoke<void>("overlay_label", { label });
+export const overlayDescribe = (text: string) => invoke<void>("overlay_describe", { text });
+export const overlaySetGame = (game: string, remember: boolean) =>
+  invoke<void>("overlay_set_game", { game, remember });
+export const overlayTimerToggle = () => invoke<void>("overlay_timer_toggle");
+export const overlayNeedsLabel = () => invoke<void>("overlay_needs_label");
+export const startTypeMode = () => invoke<void>("start_type_mode");
+export const stopTypeMode = () => invoke<void>("stop_type_mode");
+export const hideOverlay = () => invoke<void>("hide_overlay");

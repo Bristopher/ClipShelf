@@ -107,6 +107,29 @@ export interface AppConfig {
   description_presets: string[];
 }
 
+/** G-key binds + folder names + the overlay toggle bind — mirrors Rust `OverlayBinds`. */
+export interface OverlayBinds {
+  g1: string;
+  g2: string;
+  g3: string;
+  g1Name: string;
+  g2Name: string;
+  g3Name: string;
+  overlay: string;
+}
+
+/** Snapshot the overlay UI renders from — mirrors Rust `OverlayContext`. */
+export interface OverlayContext {
+  filename: string;
+  path: string;
+  game: string | null;
+  exe: string | null;
+  labelPresets: string[];
+  descriptionPresets: string[];
+  typingEnabled: boolean;
+  binds: OverlayBinds;
+}
+
 export interface RecentClip {
   name: string;
   path: string;

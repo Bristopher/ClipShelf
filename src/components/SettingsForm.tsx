@@ -30,6 +30,7 @@ const BIND_FIELDS = [
   ["save_clip_bind", "Save clip"],
   ["count_up_bind", "Count-up"],
   ["undo_bind", "Undo"],
+  ["overlay_bind", "Overlay toggle"],
 ] as const;
 
 type BindField = (typeof BIND_FIELDS)[number][0];
@@ -633,6 +634,65 @@ export function SettingsForm({ config, onConfigChange }: SettingsFormProps) {
 
       <Separator />
 
+      <section className="space-y-3">
+        <h3 className="text-sm font-semibold">Overlay</h3>
+        <div className="flex items-center justify-between">
+          <div className="pr-2">
+            <Label className="text-xs">Enable in-game overlay</Label>
+            <p className="text-[10px] text-t-muted">
+              A small menu over your game to sort/rate/label/describe the
+              latest clip without alt-tabbing.
+            </p>
+          </div>
+          <Switch
+            checked={config.overlay_enabled}
+            onCheckedChange={(v) => update({ overlay_enabled: v })}
+          />
+        </div>
+        {config.overlay_enabled && (
+          <>
+            <div className="space-y-1">
+              <Label className="text-xs">Overlay toggle hotkey</Label>
+              <KeybindInput
+                value={config.overlay_bind}
+                onChange={(v) => update({ overlay_bind: v })}
+              />
+              {conflictNote("overlay_bind")}
+              <p className="text-[10px] text-t-muted">
+                Global hotkey that opens/closes the overlay over your game.
+              </p>
+            </div>
+            <div className="flex items-center justify-between">
+              <div className="pr-2">
+                <Label className="text-xs">Allow typing in overlay</Label>
+                <p className="text-[10px] text-t-muted">
+                  Lets you type a custom label, description, or game name
+                  in-game via a low-level keyboard hook, without alt-tabbing.
+                </p>
+              </div>
+              <Switch
+                checked={config.overlay_typing_enabled}
+                onCheckedChange={(v) => update({ overlay_typing_enabled: v })}
+              />
+            </div>
+            <PresetsEditor
+              label="Label presets"
+              placeholder="e.g. Clutch"
+              values={config.label_presets}
+              onChange={(v) => update({ label_presets: v })}
+            />
+            <PresetsEditor
+              label="Description presets"
+              placeholder="e.g. GG ez"
+              values={config.description_presets}
+              onChange={(v) => update({ description_presets: v })}
+            />
+          </>
+        )}
+      </section>
+
+      <Separator />
+
       <section className="pt-1 pb-2">
         <p className="text-[11px] text-t-muted text-center">
           GKey Mover {version ? `v${version}` : ""}
@@ -740,6 +800,82 @@ function GameOverridesEditor({ config, onConfigChange }: SettingsFormProps) {
       <p className="text-[10px] text-t-muted">
         When a game is detected wrong, corrections you save here (or via
         Remember) always win.
+      </p>
+    </div>
+  );
+}
+
+/** Chip list editor for the overlay's numbered label/description presets. */
+function PresetsEditor({
+  label,
+  placeholder,
+  values,
+  onChange,
+}: {
+  label: string;
+  placeholder: string;
+  values: string[];
+  onChange: (values: string[]) => void;
+}) {
+  const [draft, setDraft] = useState("");
+
+  const add = () => {
+    const v = draft.trim();
+    if (!v || values.includes(v)) return;
+    onChange([...values, v]);
+    setDraft("");
+  };
+
+  const remove = (v: string) => onChange(values.filter((x) => x !== v));
+
+  return (
+    <div className="space-y-1.5">
+      <Label className="text-xs">{label}</Label>
+      {values.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {values.map((v) => (
+            <span
+              key={v}
+              className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-full bg-panel border border-t-border text-[11px]"
+            >
+              {v}
+              <button
+                type="button"
+                onClick={() => remove(v)}
+                title="Remove"
+                className="p-0.5 rounded-full text-t-muted hover:text-t-text hover:bg-hover"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="flex gap-2 items-center">
+        <Input
+          value={draft}
+          placeholder={placeholder}
+          className="text-xs h-8 flex-1"
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              add();
+            }
+          }}
+        />
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8 text-xs shrink-0"
+          onClick={add}
+        >
+          Add
+        </Button>
+      </div>
+      <p className="text-[10px] text-t-muted">
+        Numbered 1-9 in the overlay menu, in this order. Press 0 for custom
+        text instead.
       </p>
     </div>
   );
