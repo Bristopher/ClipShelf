@@ -1,6 +1,6 @@
 # Master Verification Checklist (2026-07-10)
 
-**Updated:** 2026-07-12
+**Updated:** 2026-07-12 (adds §16)
 
 Everything code-verified but not yet exercised live, across three batches:
 the 2026-07-02 QoL batch (undo, pause, clickable log, autostart, window
@@ -193,3 +193,40 @@ genuinely held file, and the Settings section's look/feel. Human items:
 - [ ] G1 move / rename / undo each append their history line (open the
       JSONL and eyeball)
 - [ ] Detection toggle off → no game anywhere, everything else unaffected
+
+## 16. History panel + day rollover
+
+Commits `36766f6..98ee95e` (five commits on `main`), shipped 2026-07-12.
+Phase 2 — replaces the old Restore button with a History panel and switches
+daily stats to rollover-aware bucketing (`day_rollover_hour` in config,
+default 4 AM). Rating/label/description writers and the overlay remain
+Phase 3.
+
+**Automated coverage** — full suite 74 passed, `cargo build` zero warnings,
+`tsc` + `pnpm build` clean:
+- `stats.rs`: `test_logical_date_respects_rollover_hour`,
+  `test_increment_rolls_over_stale_date`
+- `history.rs`: `test_exe_field_roundtrip_and_omitted_when_none`
+- `commands.rs`: `test_history_payloads_buckets_orders_and_filters`,
+  `test_history_payloads_unparseable_ts_kept_with_prefix_fallback`,
+  `test_history_payloads_short_ts_fallback_does_not_panic`
+
+**NOT covered by automation** — the actual History panel UI, cross-timezone
+day-bucketing behavior as seen live, and Settings integration for Remember.
+Note: each history entry's logical day is computed from the clip's OWN
+recorded UTC offset at write time, not the viewer's current timezone — a
+clip saved while traveling will bucket by the offset that was active when it
+was created, which can look surprising if you change timezones and then
+browse old history. Human items:
+
+- [ ] History button opens; Today groups by game with correct counts after a
+      few clips
+- [ ] Clip at 3:50 AM (or temporarily set `day_rollover_hour` to a
+      near-future hour) lands in the PREVIOUS day's bucket; G-key badge
+      counts agree with the panel
+- [ ] All view groups by day; entries match `history.jsonl`
+- [ ] Edit game → Save relabels; Save & Remember adds the override in
+      Settings and the next clip from that exe uses it
+- [ ] Remember disabled (tooltip) on entries without exe
+- [ ] Restore log display still works from the panel footer
+- [ ] Right-click menu actions work on rows (Reveal/Play/Copy)

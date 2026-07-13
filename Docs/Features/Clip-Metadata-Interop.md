@@ -1,10 +1,12 @@
 # Clip Metadata Interop — Reading Gkey Mover Data From Other Apps
 
-**Status:** Partially implemented (Phase 1, shipped 2026-07-12,
-spec: `Docs/specs/2026-07-12-game-detection-history-overlay-design.md`).
+**Status:** Partially implemented (Phase 1 shipped 2026-07-12, Phase 2 shipped
+2026-07-12, spec: `Docs/specs/2026-07-12-game-detection-history-overlay-design.md`).
 `history.jsonl` (§3) is live for `created`/`moved`/`renamed`/`undone` events with
-game context, and the game name is written to `System.Keywords` (§2). Everything
-else below is still design-only: `rated`/`labeled`/`described`/`game_edited`
+game context, and the game name is written to `System.Keywords` (§2). `game_edited`
+events are now also implemented — emitted by the History panel's "Edit game" action
+(Save / Save & Remember), carrying the corrected `game` and, when known, the clip's
+`exe`. Everything else below is still design-only: `rated`/`labeled`/`described`
 history events, the `System.Rating`/`System.Comment` property writes, and the
 filename label suffix convention (§1) — those land with the overlay in Phase 3.
 Field names and mappings below are the contract — implementation must match this doc, and
@@ -141,6 +143,12 @@ applicable; **skip unparseable lines** when reading (the app does too).
 Notes for consumers:
 - `ts` is RFC 3339 with local offset. The app's "day" starts at the configured rollover
   hour (default 4 AM) — bucket accordingly if you want to match its History panel.
+- The app's own History panel buckets each event by the **offset recorded in that
+  event's `ts`** (own-clip-offset bucketing), not by the viewer's current timezone or
+  clock. If you bucket by your own local clock instead, a clip written while the
+  recording machine was on a different UTC offset can land in a different day than it
+  does in the app's panel — match the app's behavior by parsing the offset out of each
+  event's own `ts` rather than normalizing all events to one timezone first.
 - `exe` is optional and present on `created` events when detection ran; it records the
   detected process's exe stem (e.g. `cs2`) separately from the resolved `game` label —
   additive since 2026-07-12.
