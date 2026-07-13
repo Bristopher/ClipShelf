@@ -1,14 +1,16 @@
 # Clip Metadata Interop — Reading Gkey Mover Data From Other Apps
 
-**Status:** Partially implemented (Phase 1 shipped 2026-07-12, Phase 2 shipped
-2026-07-12, spec: `Docs/specs/2026-07-12-game-detection-history-overlay-design.md`).
-`history.jsonl` (§3) is live for `created`/`moved`/`renamed`/`undone` events with
-game context, and the game name is written to `System.Keywords` (§2). `game_edited`
-events are now also implemented — emitted by the History panel's "Edit game" action
-(Save / Save & Remember), carrying the corrected `game` and, when known, the clip's
-`exe`. Everything else below is still design-only: `rated`/`labeled`/`described`
-history events, the `System.Rating`/`System.Comment` property writes, and the
-filename label suffix convention (§1) — those land with the overlay in Phase 3.
+**Status:** Fully implemented (Phase 1, 2, and 3 all shipped 2026-07-12, spec:
+`Docs/specs/2026-07-12-game-detection-history-overlay-design.md`).
+`history.jsonl` (§3) is live for `created`/`moved`/`renamed`/`rated`/`labeled`/
+`described`/`game_edited`/`undone` events with game context; the game name is
+written to `System.Keywords`, star ratings to `System.Rating`, and descriptions
+to `System.Comment` (§2); and the filename ` - label` suffix convention (§1) is
+live via the overlay's label action. `game_edited` events are emitted by the
+History panel's "Edit game" action (Save / Save & Remember), carrying the
+corrected `game` and, when known, the clip's `exe`. `rated`/`labeled`/
+`described` events and the property writes originate from the in-game overlay
+(Phase 3) as well as any other source that calls the same commands.
 Field names and mappings below are the contract — implementation must match this doc, and
 changes to the scheme must update this doc in the same change.
 

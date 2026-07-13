@@ -1,13 +1,15 @@
 # Master Verification Checklist (2026-07-10)
 
-**Updated:** 2026-07-12 (adds §16)
+**Updated:** 2026-07-12 (adds §17)
 
 Everything code-verified but not yet exercised live, across three batches:
 the 2026-07-02 QoL batch (undo, pause, clickable log, autostart, window
 layout), the 2026-07-05 stability/toasts/UX batch, and the two 2026-07-10
 feature rounds (drag-drop, diagnostics, MRU/tokens, filter, stats, first-run
 OBS, batch undo). Supersedes the two older checklists in this folder.
-§15 adds the 2026-07-12 game-detection + history-store feature (Phase 1).
+§15 adds the 2026-07-12 game-detection + history-store feature (Phase 1),
+§16 adds the History panel + day rollover (Phase 2), §17 adds the in-game
+overlay (Phase 3).
 
 All of it passes 51/51 cargo tests, tsc, and pnpm build (§1–§14). §15's
 game-detection round adds its own suite — see that section for numbers.
@@ -235,3 +237,68 @@ browse old history. Human items:
 - [ ] Remember disabled (tooltip) on entries without exe
 - [ ] Restore log display still works from the panel footer
 - [ ] Right-click menu actions work on rows (Reveal/Play/Copy)
+
+## 17. In-game overlay
+
+Commits `5ca3459..30fe343`, shipped 2026-07-12. Phase 3 — the final phase of
+the game-detection/history/overlay design. Spec:
+`Docs/specs/2026-07-12-game-detection-history-overlay-design.md`.
+Delivered: overlay config (bind shift+F1, typing toggle, label/description
+presets), a non-activating always-on-top overlay window
+(`WS_EX_NOACTIVATE|WS_EX_TOOLWINDOW`), the `OverlayToggle` global hotkey plus
+temporary digit/Esc hotkeys registered while the overlay is open (published
+atomically), eight overlay action commands (sort/rate/label/describe/
+set-game/timer/needs-label/context) with an acting-path property-write
+fallback, a `WH_KEYBOARD_LL` type mode (ACTIVE-gated, Shift passes through,
+translation is pure `translate_vk`), a CS:GO-style menu UI with a flash
+guard, and a Settings overlay section.
+
+**Automated coverage** — full suite 102 passed, `cargo build` zero warnings,
+`tsc` + `pnpm build` clean:
+- `config.rs`: `test_overlay_config_defaults`,
+  `test_overlay_presets_toml_roundtrip`
+- `mover.rs`: `test_labeled_name_preserves_extension`,
+  `test_labeled_name_no_extension`, `test_labeled_name_trims_label`,
+  `test_rename_file_at_collision_safe`
+- `state.rs`: `test_rekey_clip_moves_game_and_exe_in_lockstep`
+- `overlay.rs`: `test_with_acting_fallback_identity_wins`,
+  `test_with_acting_fallback_identityless_existing_clip`,
+  `test_with_acting_fallback_missing_file_stays_skip`
+- `keyhook.rs`: `letters_lowercase_without_shift`,
+  `letters_uppercase_with_shift`, `digits_ignore_shift`, `numpad_digits`,
+  `space`, `minus_and_underscore`, `period`, `unmapped_keys_return_none`
+
+**NOT covered by automation** — live Win32 window layering/focus behavior,
+the LL keyboard hook against a real foreground game, and the overlay UI's
+look/feel. Human items:
+
+- [ ] Shift+F1 opens the overlay over a borderless game without stealing
+      focus — the game keeps rendering and receiving input until a digit is
+      pressed
+- [ ] Digits drive the overlay menus while the game stays focused
+- [ ] Esc closes the overlay and releases the digit hotkeys — verify digits
+      reach the game again immediately after close
+- [ ] Sort/rate/label/describe/game/timer each work end-to-end: Explorer
+      shows Rating stars + Comments on the clip, the filename gains
+      ` - label`, `history.jsonl` gains `rated`/`labeled`/`described` rows,
+      and the History panel groups reflect the edits
+- [ ] Type mode: the game keeps focus while typing, keystrokes don't reach
+      the game, Enter commits, Esc cancels, the hook is released afterward
+      (typing in the game works again)
+- [ ] Type mode entered with Shift already held: the first letter types
+      lowercase (known cosmetic quirk) — verify it self-corrects once Shift
+      is released and re-pressed
+- [ ] After closing the overlay (including after a type-mode session),
+      digits and Esc reach the game again — no stuck hook
+- [ ] While type mode is active, Alt+Tab and Alt+F4 are intentionally
+      captured by the hook — verify the mouse still works as an escape
+      hatch (click out of the game/overlay)
+- [ ] Typing-disabled path (typing toggle off in Settings) shows the
+      needs-label notice instead of opening type mode
+- [ ] Exclusive-fullscreen game: the overlay may not draw (documented
+      limitation) but hotkey registration and game detection are unaffected
+- [ ] Overlay bind is rebindable in Settings, including binding it to a
+      plain G-key
+- [ ] Digit registration failure (another app already holds a digit
+      hotkey) degrades gracefully — no crash, remaining digits still work
+      or a clear log entry explains the gap
