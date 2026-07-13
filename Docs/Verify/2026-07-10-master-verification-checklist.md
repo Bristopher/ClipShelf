@@ -1,6 +1,6 @@
 # Master Verification Checklist (2026-07-10)
 
-**Updated:** 2026-07-12 (adds §17)
+**Updated:** 2026-07-13 (adds §18; §16 history is now a full main-view toggle)
 
 Everything code-verified but not yet exercised live, across three batches:
 the 2026-07-02 QoL batch (undo, pause, clickable log, autostart, window
@@ -223,6 +223,8 @@ browse old history. Human items:
 
 - [ ] History button opens; Today groups by game with correct counts after a
       few clips
+      (2026-07-13: History is now a full main-view toggle, not a popover —
+      the button swaps the log for the history view and back; see §18)
 - [ ] Clip at 3:50 AM (or temporarily set `day_rollover_hour` to a
       near-future hour) lands in the PREVIOUS day's bucket; G-key badge
       counts agree with the panel
@@ -302,3 +304,41 @@ look/feel. Human items:
 - [ ] Digit registration failure (another app already holds a digit
       hotkey) degrades gracefully — no crash, remaining digits still work
       or a clear log entry explains the gap
+
+## 18. History full-view toggle + theme-flash repaint fix
+
+Shipped 2026-07-13. The History button in the bottom bar now toggles the
+MAIN view: pressed once it swaps the live event log for a full-pane history
+view (Today/All, same grouping, context menu, game editing, live-refreshes
+on every new log entry); pressed again — or Esc, or the "Back to log"
+button — it returns to the live log. Restore-log-display moved into the
+history footer and flips back to the log after restoring.
+
+Same change fixes the ≤5s timer flash only recoloring "the edges": the boot
+`<style>` injected by index.html (first-paint anti-flash) is unlayered CSS
+and permanently outranked Tailwind's layered `body { bg-background }`, so
+the window background never followed runtime theme changes. `applyTheme`
+now rewrites that boot style (`#theme-boot-paint`) on every application.
+Also fixed latently: the overlay window now forces `#root` transparent too
+(the boot style painted it opaque; previously only html/body were
+overridden).
+
+**Automated coverage** — `tsc` + `pnpm build` clean (no frontend test
+runner in this repo). Human items:
+
+- [ ] History button swaps the main area to the history view; button shows
+      pressed/active styling; clicking again returns to the live log with
+      the current log entries intact (nothing lost while history was open)
+- [ ] Esc and "Back to log" also return to the live log; Esc still closes
+      an open context menu / cancels an in-row game edit FIRST (one Esc per
+      layer)
+- [ ] Save a clip while the history view is open → the new clip appears in
+      Today without reopening the view
+- [ ] Timer flash (set timer ≤ 10s, let it run to 5): the WHOLE window
+      alternates to the contrasting theme each second — background, log
+      area, panels, text — and returns exactly to the active theme after
+      the flash ends and on expiry
+- [ ] Theme switching in Settings still repaints instantly, and app relaunch
+      first-paints in the last active theme (no white/dark flash at boot)
+- [ ] Overlay window is still fully transparent around the menu card (no
+      opaque rectangle behind it)

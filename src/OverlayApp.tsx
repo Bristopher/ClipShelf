@@ -99,13 +99,19 @@ export function OverlayApp() {
     // that fills the whole (Tauri-transparent) window surface — override it
     // here rather than editing the shared stylesheet, so no other window is
     // affected.
+    // The boot <style> in index.html also paints #root opaque — override
+    // all three surfaces the boot script targets.
+    const root = document.getElementById("root");
     const prevBodyBg = document.body.style.background;
     const prevHtmlBg = document.documentElement.style.background;
+    const prevRootBg = root?.style.background ?? "";
     document.body.style.background = "transparent";
     document.documentElement.style.background = "transparent";
+    if (root) root.style.background = "transparent";
     return () => {
       document.body.style.background = prevBodyBg;
       document.documentElement.style.background = prevHtmlBg;
+      if (root) root.style.background = prevRootBg;
     };
   }, []);
 

@@ -15,11 +15,13 @@
           var bg = (cached && cached.bg) || "#0a0a0a";
           var fg = (cached && cached.text) || "#fafafa";
           var s = document.createElement("style");
+          s.id = "theme-boot-paint";
           s.textContent =
             "html,body,#root{background:" + bg + ";color:" + fg + ";margin:0;}";
           document.head.appendChild(s);
         } catch (e) {
           var s = document.createElement("style");
+          s.id = "theme-boot-paint";
           s.textContent =
             "html,body,#root{background:#0a0a0a;color:#fafafa;margin:0;}";
           document.head.appendChild(s);

@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { History } from "lucide-react";
 import { getHistory, editHistoryGame, restoreLog, revealInExplorer } from "@/lib/commands";
+import { EVENTS } from "@/lib/events";
 import { EntryContextMenu, type ContextMenuState } from "@/components/EntryContextMenu";
 import { errorMessage, toastError, toastSuccess } from "@/lib/toast";
 import type { HistoryEntry, LogEntry } from "@/types";
 
-interface HistoryPanelButtonProps {
+interface HistoryViewProps {
+  /** Toggle back to the live event log (History button / Esc). */
+  onClose: () => void;
   onRestore: (entries: LogEntry[]) => void;
   dayRolloverHour: number;
 }
@@ -97,24 +100,24 @@ function groupByDay(entries: HistoryEntry[]): [string, HistoryEntry[]][] {
 }
 
 /**
- * History button + popover — the entry point for the History panel. Mirrors
- * BottomBar's DiagnosticsButton popover idiom (button + absolutely-positioned
- * panel, click-outside + Esc close, fetch on open), but wider and with a
- * Today/All toggle. Also carries the old Restore-log-display action, moved
- * into the footer.
+ * Full-pane history view — swapped into the main area in place of the live
+ * event log while the BottomBar History toggle is on. Fetches on mount and
+ * whenever a new log entry lands (so clips saved while it's open appear
+ * live), with a Today/All toggle and per-row context menu / game editing.
+ * Esc returns to the live log when no context menu or edit is open.
  */
-export function HistoryPanelButton({ onRestore, dayRolloverHour }: HistoryPanelButtonProps) {
-  const [open, setOpen] = useState(false);
+export function HistoryView({ onClose, onRestore, dayRolloverHour }: HistoryViewProps) {
   const [view, setView] = useState<ViewMode>("today");
   const [entries, setEntries] = useState<HistoryEntry[] | null>(null);
   const [menu, setMenu] = useState<HistoryMenuState | null>(null);
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
-  const wrapRef = useRef<HTMLDivElement>(null);
-  // Live mirror of `menu` so the panel's [open]-keyed Esc handler can defer
-  // to the context menu without re-registering on every menu change.
+  // Live mirrors so the mount-keyed listeners see current state without
+  // re-registering on every change.
   const menuRef = useRef<HistoryMenuState | null>(null);
   menuRef.current = menu;
+  const viewRef = useRef<ViewMode>(view);
+  viewRef.current = view;
   // Set when a mousedown just closed the context menu — the click that
   // follows must NOT fire the row's reveal action.
   const menuJustClosedRef = useRef(false);
@@ -125,42 +128,29 @@ export function HistoryPanelButton({ onRestore, dayRolloverHour }: HistoryPanelB
       .catch((e) => toastError(errorMessage(e)));
   };
 
-  // Close the panel and reset any in-flight edit/context-menu so reopening
-  // starts clean — used by every close path (Esc, outside click, toggle).
-  const closePanel = () => {
-    setOpen(false);
-    setEditingKey(null);
-    setMenu(null);
-  };
+  // Initial fetch + live refresh: every backend action that appears in the
+  // event log also lands in history, so LOG_ENTRY is the refresh signal.
+  useEffect(() => {
+    load(viewRef.current === "all");
+    const unlisten = listen(EVENTS.LOG_ENTRY, () => {
+      load(viewRef.current === "all");
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
 
   useEffect(() => {
-    if (!open) return;
-    load(view === "all");
-    const onDown = (e: MouseEvent) => {
-      // This listener registered before the menu's (panel opens first), so
-      // it runs first on each mousedown — clear any stale suppression flag
-      // before the menu's close handler may set it for THIS mousedown.
-      menuJustClosedRef.current = false;
-      // While a context menu is open, a mousedown outside it closes the
-      // MENU (via its own [menu] effect), not the panel.
-      if (menuRef.current) return;
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
-        closePanel();
-      }
-    };
     const onKey = (e: KeyboardEvent) => {
       // Esc closes the context menu first (its own [menu] effect handles
-      // that); only close the panel when no menu is open.
-      if (e.key === "Escape" && !menuRef.current) closePanel();
+      // that); only leave the history view when no menu is open. Edit-input
+      // Esc stops propagation before reaching here.
+      if (e.key === "Escape" && !menuRef.current) onClose();
     };
-    document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
+    return () => document.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, []);
 
   // Context menu closes on any mousedown elsewhere or Esc — same idiom as
   // EventLog's [menu]-keyed effect. The EntryContextMenu itself swallows
@@ -190,7 +180,11 @@ export function HistoryPanelButton({ onRestore, dayRolloverHour }: HistoryPanelB
 
   const handleRestore = () => {
     restoreLog()
-      .then(onRestore)
+      .then((restored) => {
+        onRestore(restored);
+        // The restored log is the point — flip back to the live view.
+        onClose();
+      })
       .catch((e) => toastError(`Restore failed: ${errorMessage(e)}`));
   };
 
@@ -253,7 +247,7 @@ export function HistoryPanelButton({ onRestore, dayRolloverHour }: HistoryPanelB
               onKeyDown={(ev) => {
                 if (ev.key === "Escape") {
                   // Cancel the edit only — don't let the document-level
-                  // Esc listener also close the whole panel.
+                  // Esc listener also close the whole view.
                   ev.stopPropagation();
                   setEditingKey(null);
                 }
@@ -300,79 +294,73 @@ export function HistoryPanelButton({ onRestore, dayRolloverHour }: HistoryPanelB
     });
 
   return (
-    <div ref={wrapRef} className="relative">
-      <Button
-        variant="ghost"
-        size="sm"
-        className="h-7 text-xs gap-1"
-        title="History"
-        aria-label="History"
-        onClick={() => (open ? closePanel() : setOpen(true))}
-      >
-        <History className="h-3 w-3" />
-        History
-      </Button>
-      {open && (
-        <div className="absolute bottom-full right-0 mb-2 z-50 w-96 max-h-[70vh] flex flex-col rounded-md border border-t-border bg-panel shadow-lg animate-in fade-in-0 zoom-in-95 duration-150">
-          <div className="flex items-center justify-between px-3 pt-3 pb-2">
-            <p className="text-[11px] font-semibold text-t-text">History</p>
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] text-t-muted">{entries?.length ?? 0} entries</span>
-              <div className="flex items-center rounded border border-t-border overflow-hidden">
-                {(["today", "all"] as const).map((v) => (
-                  <button
-                    key={v}
-                    onClick={() => switchView(v)}
-                    className={`px-2 py-0.5 text-[10px] capitalize ${
-                      view === v ? "bg-hover text-t-text" : "text-t-muted hover:text-t-text"
-                    }`}
-                  >
-                    {v}
-                  </button>
-                ))}
-              </div>
-            </div>
+    <div className="flex-1 min-h-0 flex flex-col">
+      <div className="flex items-center justify-between px-3 pt-2 pb-1.5 border-b border-t-border">
+        <p className="text-[11px] font-semibold text-t-text">History</p>
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-t-muted">{entries?.length ?? 0} entries</span>
+          <div className="flex items-center rounded border border-t-border overflow-hidden">
+            {(["today", "all"] as const).map((v) => (
+              <button
+                key={v}
+                onClick={() => switchView(v)}
+                className={`px-2 py-0.5 text-[10px] capitalize ${
+                  view === v ? "bg-hover text-t-text" : "text-t-muted hover:text-t-text"
+                }`}
+              >
+                {v}
+              </button>
+            ))}
           </div>
-
-          <div className="flex-1 min-h-0 overflow-y-auto px-2">
-            {entries === null ? (
-              <p className="text-[10px] text-t-muted px-1.5 py-2">Loading...</p>
-            ) : entries.length === 0 ? (
-              <p className="text-[10px] text-t-muted px-1.5 py-2 italic">
-                {view === "today" ? "No clips yet today." : "No history yet."}
-              </p>
-            ) : view === "today" ? (
-              renderGameGroups(entries)
-            ) : (
-              groupByDay(entries).map(([day, rows]) => {
-                const clips = distinctClips(rows);
-                return (
-                <div key={day} className="mb-3">
-                  <p className="text-[10px] font-semibold text-t-text px-1.5 py-0.5 border-b border-t-border">
-                    {fmtDay(day)} — {clips} clip{clips === 1 ? "" : "s"}
-                  </p>
-                  {renderGameGroups(rows)}
-                </div>
-                );
-              })
-            )}
-          </div>
-
-          <div className="px-3 py-2 border-t border-t-border space-y-1">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 text-[10px] w-full"
-              onClick={handleRestore}
-            >
-              Restore log display
-            </Button>
-            <p className="text-[10px] text-t-muted text-center">
-              Today starts at {dayRolloverHour}:00 (Settings)
-            </p>
-          </div>
+          <button
+            onClick={onClose}
+            title="Back to live log (Esc)"
+            className="text-[10px] text-t-muted hover:text-t-text px-1.5 py-0.5 rounded border border-t-border"
+          >
+            Back to log
+          </button>
         </div>
-      )}
+      </div>
+
+      <div className="flex-1 min-h-0 overflow-y-auto px-2 py-1">
+        {entries === null ? (
+          <p className="text-[10px] text-t-muted px-1.5 py-2">Loading...</p>
+        ) : entries.length === 0 ? (
+          <p className="text-[10px] text-t-muted px-1.5 py-2 italic">
+            {view === "today" ? "No clips yet today." : "No history yet."}
+          </p>
+        ) : view === "today" ? (
+          renderGameGroups(entries)
+        ) : (
+          groupByDay(entries).map(([day, rows]) => {
+            const clips = distinctClips(rows);
+            return (
+            <div key={day} className="mb-3">
+              <p className="text-[10px] font-semibold text-t-text px-1.5 py-0.5 border-b border-t-border">
+                {fmtDay(day)} — {clips} clip{clips === 1 ? "" : "s"}
+              </p>
+              {renderGameGroups(rows)}
+            </div>
+            );
+          })
+        )}
+      </div>
+
+      <div className="px-3 py-1.5 border-t border-t-border flex items-center justify-between">
+        <p className="text-[10px] text-t-muted">
+          Today starts at {dayRolloverHour}:00 (Settings)
+        </p>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-6 text-[10px]"
+          title="Restore the wiped log display, then return to the live view"
+          onClick={handleRestore}
+        >
+          Restore log display
+        </Button>
+      </div>
+
       {menu && (
         <EntryContextMenu
           menu={menu}

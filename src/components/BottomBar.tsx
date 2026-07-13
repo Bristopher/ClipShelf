@@ -5,6 +5,7 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import {
   Activity,
+  History,
   Pause,
   Play,
   RotateCw,
@@ -26,19 +27,18 @@ import { useCountUp } from "@/hooks/useCountUp";
 import { useWatcherStatus } from "@/hooks/useWatcherStatus";
 import { useObsStatus } from "@/hooks/useObsStatus";
 import { errorMessage, toastError, toastInfo } from "@/lib/toast";
-import { HistoryPanelButton } from "@/components/HistoryPanel";
-import type { Diagnostics, LogEntry } from "@/types";
+import type { Diagnostics } from "@/types";
 
 interface BottomBarProps {
   mode: "rename" | "sort";
   autoWipe: boolean;
   /** Show the OBS WebSocket connection dot (only when the integration is on). */
   obsEnabled: boolean;
-  /** History panel footer hint: "Today starts at {hour}:00 (Settings)". */
-  dayRolloverHour: number;
+  /** History view is currently swapped into the main area. */
+  historyOpen: boolean;
   onAutoWipeChange: (value: boolean) => void;
   onWipe: () => void;
-  onRestore: (entries: LogEntry[]) => void;
+  onToggleHistory: () => void;
 }
 
 function fmt(secs: number) {
@@ -76,10 +76,10 @@ export function BottomBar({
   mode,
   autoWipe,
   obsEnabled,
-  dayRolloverHour,
+  historyOpen,
   onAutoWipeChange,
   onWipe,
-  onRestore,
+  onToggleHistory,
 }: BottomBarProps) {
   const countUp = useCountUp();
   const watcher = useWatcherStatus();
@@ -120,7 +120,17 @@ export function BottomBar({
       <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={handleWipe}>
         Wipe
       </Button>
-      <HistoryPanelButton onRestore={onRestore} dayRolloverHour={dayRolloverHour} />
+      <Button
+        variant="ghost"
+        size="sm"
+        className={`h-7 text-xs gap-1 ${historyOpen ? "bg-hover text-t-text" : ""}`}
+        title={historyOpen ? "Back to live log" : "Show clip history"}
+        aria-pressed={historyOpen}
+        onClick={onToggleHistory}
+      >
+        <History className="h-3 w-3" />
+        History
+      </Button>
       <Button
         variant="ghost"
         size="sm"

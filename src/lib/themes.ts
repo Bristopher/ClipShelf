@@ -101,6 +101,14 @@ export function applyTheme(theme: Theme) {
     const text = resolveCssColor(theme.tokens.text);
     if (bg && text) {
       localStorage.setItem("gkey-theme-paint", JSON.stringify({ bg, text }));
+      // The boot <style> is unlayered so it outranks Tailwind's layered
+      // `body { bg-background }` rule forever — rewrite it on every theme
+      // application or the window background stays stuck on the boot color
+      // (visible as "only the edges change" during the timer flash).
+      const boot = document.getElementById("theme-boot-paint");
+      if (boot) {
+        boot.textContent = `html,body,#root{background:${bg};color:${text};margin:0;}`;
+      }
     }
   } catch {
     /* noop */

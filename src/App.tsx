@@ -18,6 +18,7 @@ import { useTimer } from "@/hooks/useTimer";
 import { useTheme } from "@/hooks/useTheme";
 import { resolveFlashTheme } from "@/lib/themes";
 import { EventLog } from "@/components/EventLog";
+import { HistoryView } from "@/components/HistoryPanel";
 import { Sidebar } from "@/components/Sidebar";
 import { TimerDisplay } from "@/components/TimerDisplay";
 import { BottomBar } from "@/components/BottomBar";
@@ -56,6 +57,9 @@ function App() {
   const [config, setConfig] = useState<AppConfig | null>(null);
   const { entries, clear, restore } = useEventLog();
   const [filterOpen, setFilterOpen] = useState(false);
+  // History toggle: swaps the main area between the live event log and the
+  // full-pane clip history.
+  const [historyOpen, setHistoryOpen] = useState(false);
   // Drag-drop hover state: which G-key button the file is over (1-4), or
   // null; dragActive drives the "drop to rename" hint over the log.
   const [dropKey, setDropKey] = useState<number | null>(null);
@@ -259,12 +263,20 @@ function App() {
       <div className="flex flex-1 min-h-0 relative">
         <Sidebar config={config} dropKey={dropKey} />
         <main className="flex-1 flex flex-col min-w-0 relative">
-          <EventLog
-            entries={entries}
-            config={config}
-            filterOpen={filterOpen}
-            onCloseFilter={() => setFilterOpen(false)}
-          />
+          {historyOpen ? (
+            <HistoryView
+              onClose={() => setHistoryOpen(false)}
+              onRestore={restore}
+              dayRolloverHour={config.day_rollover_hour}
+            />
+          ) : (
+            <EventLog
+              entries={entries}
+              config={config}
+              filterOpen={filterOpen}
+              onCloseFilter={() => setFilterOpen(false)}
+            />
+          )}
           {dragActive && dropKey === null && (
             <div className="absolute inset-0 z-30 pointer-events-none flex items-center justify-center bg-black/30 border-2 border-dashed border-t-border rounded-sm m-1">
               <span className="text-xs font-semibold text-t-text bg-panel/90 px-3 py-1.5 rounded border border-t-border shadow">
@@ -276,10 +288,10 @@ function App() {
             mode={config.disable_file_movesorting ? "rename" : "sort"}
             autoWipe={config.auto_wipe_enabled}
             obsEnabled={config.obs_websocket_enabled}
-            dayRolloverHour={config.day_rollover_hour}
+            historyOpen={historyOpen}
             onAutoWipeChange={(v) => updateConfig({ auto_wipe_enabled: v }).then(setConfig)}
             onWipe={clear}
-            onRestore={restore}
+            onToggleHistory={() => setHistoryOpen((v) => !v)}
           />
         </main>
         <TimerDisplay
