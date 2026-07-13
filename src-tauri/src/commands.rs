@@ -17,8 +17,9 @@ use crate::watcher::WatcherCommand;
 /// each event separately and never relabels a clip whose game was corrected —
 /// so a moved/renamed clip looked like several clips, and a `game_edited`
 /// event only changed one row. Here we walk the log chronologically (input is
-/// oldest-first) tracking each physical clip across `moved`/`renamed`/`undone`
-/// path transfers, apply the latest `game_edited` to the whole chain, and tag
+/// oldest-first) tracking each physical clip across
+/// `moved`/`renamed`/`labeled`/`undone` path transfers, apply the latest
+/// `game_edited` to the whole chain, and tag
 /// every event with its clip's identity index (`clip_id`). The frontend counts
 /// DISTINCT `clip_id`s per group and shows each clip's EFFECTIVE game.
 ///
@@ -68,7 +69,7 @@ pub(crate) fn history_payloads(
             // written against a PRE-move path (user right-clicked the created
             // row of a sorted clip) still finds the chain. A later `created`
             // at the old path overwrites the mapping, so reuse stays correct.
-            "moved" | "renamed" | "undone" => {
+            "moved" | "renamed" | "labeled" | "undone" => {
                 match e.old_path.as_deref().and_then(|p| path_to_id.get(p).copied()) {
                     Some(idx) => {
                         path_to_id.insert(&e.path, idx);
@@ -1499,6 +1500,62 @@ mod tests {
         let distinct: std::collections::HashSet<usize> =
             out.iter().map(|e| e.clip_id).collect();
         assert_eq!(distinct.len(), 1, "one clip, never split across groups");
+    }
+
+    #[test]
+    fn test_reconcile_labeled_event_keeps_clip_identity() {
+        // created(A) + labeled(A -> A-labeled) + moved(A-labeled -> B): a
+        // `labeled` event carries old_path -> path exactly like a rename, so all
+        // three events must share ONE clip_id (it must not split the clip).
+        let events = vec![
+            ev_kind("2026-07-12T10:00:00-06:00", "created", "C:/clips/a.mp4")
+                .with_game("Halo"),
+            {
+                let mut l = ev_kind(
+                    "2026-07-12T10:01:00-06:00",
+                    "labeled",
+                    "C:/clips/a - clutch.mp4",
+                )
+                .with_label("clutch");
+                l.old_path = Some("C:/clips/a.mp4".to_string());
+                l
+            },
+            {
+                let mut m = ev_kind(
+                    "2026-07-12T10:02:00-06:00",
+                    "moved",
+                    "C:/clips/sorted/a - clutch.mp4",
+                );
+                m.old_path = Some("C:/clips/a - clutch.mp4".to_string());
+                m
+            },
+        ];
+        let out = history_payloads(events.clone(), 4, true, "2026-07-12");
+        assert_eq!(out.len(), 3);
+        let distinct: std::collections::HashSet<usize> =
+            out.iter().map(|e| e.clip_id).collect();
+        assert_eq!(distinct.len(), 1, "labeled must not split the clip identity");
+
+        // game_edited(A) after the chain relabels ALL THREE events to the
+        // corrected game, following the whole chain through the labeled hop.
+        let mut with_edit = events;
+        with_edit.push(
+            ev_kind("2026-07-12T10:03:00-06:00", "game_edited", "C:/clips/a.mp4")
+                .with_game("Valorant"),
+        );
+        let out = history_payloads(with_edit, 4, true, "2026-07-12");
+        assert_eq!(out.len(), 4);
+        for row in &out {
+            assert_eq!(
+                row.game.as_deref(),
+                Some("Valorant"),
+                "event {} relabeled through the labeled hop",
+                row.event
+            );
+        }
+        let distinct: std::collections::HashSet<usize> =
+            out.iter().map(|e| e.clip_id).collect();
+        assert_eq!(distinct.len(), 1);
     }
 
     #[test]

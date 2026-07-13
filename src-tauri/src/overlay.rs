@@ -126,6 +126,14 @@ fn target_position(window: &tauri::WebviewWindow) -> Option<(i32, i32)> {
 /// (read under a short state lock). Every path that reveals the overlay goes
 /// through here so key registration and the open event stay symmetric.
 pub fn open(app: &AppHandle, controller: &HotkeyController, state: &AppState) {
+    // If the overlay window doesn't exist there is nothing to reveal — bail
+    // before arming the temporary keys or emitting overlay-open, so we never
+    // register overlay-only binds against a window that can't handle them.
+    if app.get_webview_window(LABEL).is_none() {
+        log::warn!("overlay: open called but window is missing — skipping");
+        return;
+    }
+
     show(app);
     controller.set_overlay_keys(true);
 
@@ -403,21 +411,25 @@ fn do_overlay_label(app: &AppHandle, state: &AppState, label: &str) -> Result<()
             Ok(())
         }
         Err(e) => {
-            let mut s = state.lock().map_err(|e| e.to_string())?;
-            let entry = s.logger.log(
-                LogLevel::Error,
-                format!("Label failed: {}", e),
-                LogCategory::System,
-            );
-            let _ = app.emit("log-entry", &entry);
+            let msg = format!("Label failed: {}", e);
+            {
+                let mut s = state.lock().map_err(|e| e.to_string())?;
+                let entry = s
+                    .logger
+                    .log(LogLevel::Error, msg.clone(), LogCategory::System);
+                let _ = app.emit("log-entry", &entry);
+            }
             let _ = app.emit(
                 "error",
                 ErrorPayload {
-                    message: format!("Label failed: {}", e),
+                    message: msg.clone(),
                     context: "label".to_string(),
                 },
             );
-            Ok(())
+            // Propagate the failure so the overlay's label action rejects and
+            // flashes red — previously this returned Ok(()) and told the overlay
+            // the label succeeded even though the rename had failed.
+            Err(msg)
         }
     }
 }

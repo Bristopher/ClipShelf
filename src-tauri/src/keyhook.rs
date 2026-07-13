@@ -58,22 +58,61 @@ static APP: OnceLock<AppHandle> = OnceLock::new();
 /// Guards the one-time spawn of the hook thread.
 static THREAD_SPAWN: Once = Once::new();
 
+/// True once the LL keyboard hook actually installed. Set from the first
+/// `start`'s bounded wait on the hook thread's ack. If it stays false the hook
+/// never went in and type mode can't capture anything — `start` returns Err so
+/// the frontend falls back to needs-label instead of silently doing nothing.
+static HOOK_INSTALLED: AtomicBool = AtomicBool::new(false);
+
+/// How long the first `start` waits for the hook thread to confirm install.
+/// Bounded so an async command never hangs; install is a single Win32 call and
+/// completes in microseconds, so 200ms is generous slack, not a real delay.
+const INSTALL_ACK_TIMEOUT_MS: u64 = 200;
+
 /// Enable type mode. Idempotent: the first call spawns the dedicated hook
-/// thread and remembers the app handle; every call (including repeats) just
-/// arms `ACTIVE`.
+/// thread, remembers the app handle, and waits (briefly) for the hook to
+/// confirm it installed; every later call just re-checks install state and arms
+/// `ACTIVE`. Returns Err if the hook never installed so callers can fall back.
 pub fn start(app: AppHandle) -> Result<(), String> {
     // Remember the handle for the hook proc (first start wins).
     let _ = APP.set(app);
 
-    // Spawn the pump thread exactly once. It installs the hook and lives for
-    // the rest of the process.
+    // Spawn the pump thread exactly once. It installs the hook, acks whether the
+    // install succeeded, then lives for the rest of the process.
+    let mut first_spawn = false;
+    let mut ack_rx: Option<std::sync::mpsc::Receiver<bool>> = None;
     THREAD_SPAWN.call_once(|| {
-        std::thread::Builder::new()
+        first_spawn = true;
+        let (tx, rx) = std::sync::mpsc::channel::<bool>();
+        ack_rx = Some(rx);
+        if let Err(e) = std::thread::Builder::new()
             .name("gkey-keyhook".into())
-            .spawn(hook_thread_main)
-            .map_err(|e| log::error!("keyhook: failed to spawn hook thread: {}", e))
-            .ok();
+            .spawn(move || hook_thread_main(tx))
+        {
+            log::error!("keyhook: failed to spawn hook thread: {}", e);
+            // The spawn failed, so `tx` was dropped with the closure; the
+            // recv_timeout below will see a disconnected channel and treat it
+            // as an install failure.
+        }
     });
+
+    if first_spawn {
+        // Bounded, non-hanging wait for the hook thread's install ack. A dropped
+        // sender (spawn failed) or a timeout both resolve to "not installed".
+        let installed = ack_rx
+            .and_then(|rx| {
+                rx.recv_timeout(std::time::Duration::from_millis(INSTALL_ACK_TIMEOUT_MS))
+                    .ok()
+            })
+            .unwrap_or(false);
+        HOOK_INSTALLED.store(installed, Ordering::SeqCst);
+        if !installed {
+            return Err("keyboard hook failed to install".to_string());
+        }
+    } else if !HOOK_INSTALLED.load(Ordering::SeqCst) {
+        // A prior start already determined the hook can't be installed.
+        return Err("keyboard hook is not installed".to_string());
+    }
 
     ACTIVE.store(true, Ordering::SeqCst);
     Ok(())
@@ -89,7 +128,7 @@ pub fn stop() {
 
 /// The hook thread: install the LL keyboard hook once, then pump messages
 /// forever. `GetMessageW` blocks the thread while keeping the hook serviced.
-fn hook_thread_main() {
+fn hook_thread_main(ack: std::sync::mpsc::Sender<bool>) {
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         GetMessageW, SetWindowsHookExW, MSG, WH_KEYBOARD_LL,
@@ -100,8 +139,11 @@ fn hook_thread_main() {
         let hook = SetWindowsHookExW(WH_KEYBOARD_LL, Some(hook_proc), hinstance, 0);
         if hook.is_null() {
             log::error!("keyhook: SetWindowsHookExW failed");
+            let _ = ack.send(false);
             return;
         }
+        // Confirm the install to the waiting `start` before entering the pump.
+        let _ = ack.send(true);
 
         // Message pump keeps the hook alive. An LL keyboard hook delivers its
         // callbacks on this thread; the messages themselves need no dispatch.
@@ -126,10 +168,33 @@ fn emit(payload: serde_json::Value) {
 }
 
 /// Is this vkCode one of the Shift keys (either side, or the generic VK_SHIFT)?
+/// PURE (no OS calls, no state) so it is unit-testable.
 #[inline]
-fn is_shift(vk: u32) -> bool {
+pub(crate) fn is_shift(vk: u32) -> bool {
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{VK_LSHIFT, VK_RSHIFT, VK_SHIFT};
     vk == VK_SHIFT as u32 || vk == VK_LSHIFT as u32 || vk == VK_RSHIFT as u32
+}
+
+/// Is this vkCode ANY keyboard modifier — Shift, Ctrl, Alt (Menu), or a Win
+/// key, generic or side-specific? While type mode swallows every ordinary key,
+/// modifiers must pass through (`CallNextHookEx`) so the game never sees a
+/// half-delivered chord: swallowing a Ctrl/Alt/Win keydown while its keyup goes
+/// through (or vice versa) leaves that modifier stuck "down" in the game.
+/// PURE (no OS calls, no state) so it is unit-testable.
+#[inline]
+pub(crate) fn is_modifier(vk: u32) -> bool {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+        VK_CONTROL, VK_LCONTROL, VK_LMENU, VK_LWIN, VK_MENU, VK_RCONTROL, VK_RMENU, VK_RWIN,
+    };
+    is_shift(vk)
+        || vk == VK_CONTROL as u32
+        || vk == VK_LCONTROL as u32
+        || vk == VK_RCONTROL as u32
+        || vk == VK_MENU as u32
+        || vk == VK_LMENU as u32
+        || vk == VK_RMENU as u32
+        || vk == VK_LWIN as u32
+        || vk == VK_RWIN as u32
 }
 
 /// The low-level keyboard hook procedure.
@@ -160,11 +225,14 @@ unsafe extern "system" fn hook_proc(
 
     match msg {
         WM_KEYDOWN | WM_SYSKEYDOWN => {
-            // Pure modifiers pass through — swallowing a Shift keydown while
-            // letting its keyup through (or vice versa) causes stuck-key
-            // weirdness in the game.
-            if is_shift(vk) {
-                SHIFT_DOWN.store(true, Ordering::SeqCst);
+            // Pure modifiers (Shift/Ctrl/Alt/Win, either side) pass through —
+            // swallowing a modifier keydown while letting its keyup through (or
+            // vice versa) leaves that modifier stuck "down" in the game. Shift
+            // additionally maintains SHIFT_DOWN for letter casing.
+            if is_modifier(vk) {
+                if is_shift(vk) {
+                    SHIFT_DOWN.store(true, Ordering::SeqCst);
+                }
                 return CallNextHookEx(ptr::null_mut(), code, wparam, lparam);
             }
 
@@ -172,6 +240,14 @@ unsafe extern "system" fn hook_proc(
                 emit(serde_json::json!({ "kind": "enter" }));
             } else if vk == VK_ESCAPE as u32 {
                 emit(serde_json::json!({ "kind": "esc" }));
+                // Hard keyboard-recovery hatch: Esc ALWAYS frees the keyboard,
+                // even if the webview is dead and never round-trips a
+                // stopTypeMode back to us. Inline the same atomic stores as
+                // stop() (never call anything that could block in the hook
+                // proc). Happy path is unchanged — the frontend's stopTypeMode
+                // is idempotent, so a live overlay just stops twice.
+                ACTIVE.store(false, Ordering::SeqCst);
+                SHIFT_DOWN.store(false, Ordering::SeqCst);
             } else if vk == VK_BACK as u32 {
                 emit(serde_json::json!({ "kind": "backspace" }));
             } else if let Some(ch) = translate_vk(vk, SHIFT_DOWN.load(Ordering::SeqCst)) {
@@ -181,10 +257,12 @@ unsafe extern "system" fn hook_proc(
             1
         }
         WM_KEYUP | WM_SYSKEYUP => {
-            // Symmetric with the keydown: modifiers pass through (and clear the
-            // tracked state), everything else is swallowed.
-            if is_shift(vk) {
-                SHIFT_DOWN.store(false, Ordering::SeqCst);
+            // Symmetric with the keydown: modifiers pass through (and Shift
+            // clears its tracked state), everything else is swallowed.
+            if is_modifier(vk) {
+                if is_shift(vk) {
+                    SHIFT_DOWN.store(false, Ordering::SeqCst);
+                }
                 return CallNextHookEx(ptr::null_mut(), code, wparam, lparam);
             }
             1
@@ -244,7 +322,44 @@ pub fn stop_type_mode() {
 
 #[cfg(test)]
 mod tests {
-    use super::translate_vk;
+    use super::{is_modifier, translate_vk};
+
+    #[test]
+    fn all_modifiers_are_passthrough() {
+        // Shift/Ctrl/Alt/Win — generic and both sides — must all be modifiers
+        // so type mode passes them through and never strands a game chord.
+        for vk in [
+            0x10, // VK_SHIFT
+            0xA0, // VK_LSHIFT
+            0xA1, // VK_RSHIFT
+            0x11, // VK_CONTROL
+            0xA2, // VK_LCONTROL
+            0xA3, // VK_RCONTROL
+            0x12, // VK_MENU (Alt)
+            0xA4, // VK_LMENU
+            0xA5, // VK_RMENU
+            0x5B, // VK_LWIN
+            0x5C, // VK_RWIN
+        ] {
+            assert!(is_modifier(vk), "vk {:#x} should be a modifier", vk);
+        }
+    }
+
+    #[test]
+    fn ordinary_keys_are_not_modifiers() {
+        for vk in [
+            0x41, // 'A'
+            0x30, // '0'
+            0x20, // Space
+            0x0D, // Enter
+            0x1B, // Esc
+            0x08, // Backspace
+            0x09, // Tab
+            0x70, // F1
+        ] {
+            assert!(!is_modifier(vk), "vk {:#x} should not be a modifier", vk);
+        }
+    }
 
     #[test]
     fn letters_lowercase_without_shift() {

@@ -155,8 +155,11 @@ Notes for consumers:
   detected process's exe stem (e.g. `cs2`) separately from the resolved `game` label —
   additive since 2026-07-12.
 - `rating` here is **1–5 stars** (human scale); only the Windows property uses 1–99.
-- The latest `moved`/`renamed` event for a clip has its current `path`; follow the
-  `old_path` → `path` chain to track a file across events.
+- The latest `moved`/`renamed`/`labeled` event for a clip has its current `path`;
+  follow the `old_path` → `path` chain to track a file across events. `labeled`
+  renames the file (it appends the ` - <label>` suffix), so it carries
+  `old_path` → `path` just like `moved`/`renamed` — treat it as part of the same
+  chain, not a new clip.
 - Read-share the file (it may be appended to while the app runs); never write to it.
 
 ## 4. Gotchas
