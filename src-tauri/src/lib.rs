@@ -635,6 +635,8 @@ pub fn run() {
             commands::get_gkey_stats,
             commands::get_diagnostics,
             commands::test_obs_connection,
+            commands::get_history,
+            commands::edit_history_game,
         ])
         .on_window_event(|window, event| {
             match event {

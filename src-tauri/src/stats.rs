@@ -28,7 +28,17 @@ pub struct DailyStats {
 /// The "logical" date a timestamp belongs to when the day starts at
 /// `rollover_hour` instead of midnight — 3 AM clips count as yesterday for
 /// a 4 AM rollover. Pure so it's testable; clamps the hour to 0-23.
-pub fn logical_date_of(dt: chrono::DateTime<chrono::Local>, rollover_hour: u8) -> String {
+///
+/// Generic over the timezone so history bucketing can pass the timestamp's
+/// OWN recorded offset (history `ts` is written in local time), keeping the
+/// day stable even if the viewer's machine changes timezone.
+pub fn logical_date_of<Tz: chrono::TimeZone>(
+    dt: chrono::DateTime<Tz>,
+    rollover_hour: u8,
+) -> String
+where
+    Tz::Offset: std::fmt::Display,
+{
     let shifted = dt - chrono::Duration::hours(rollover_hour.min(23) as i64);
     shifted.format("%Y-%m-%d").to_string()
 }

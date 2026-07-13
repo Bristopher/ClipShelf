@@ -127,3 +127,26 @@ pub struct DiagnosticsPayload {
     pub obs_enabled: bool,
     pub obs_status: String,
 }
+
+/// One row in the History panel — a `history.jsonl` event mapped for the UI,
+/// with the logical day bucket and filename precomputed so the frontend never
+/// re-derives them.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct HistoryEntryPayload {
+    pub ts: String,
+    pub event: String,
+    pub path: String,
+    #[serde(rename = "oldPath")]
+    pub old_path: Option<String>,
+    pub game: Option<String>,
+    pub exe: Option<String>,
+    pub key: Option<u8>,
+    pub rating: Option<u8>,
+    pub label: Option<String>,
+    pub description: Option<String>,
+    pub source: String,
+    /// Logical day bucket ("YYYY-MM-DD") computed with the configured
+    /// rollover hour — the frontend groups by this, never re-derives it.
+    pub day: String,
+    pub filename: String,
+}

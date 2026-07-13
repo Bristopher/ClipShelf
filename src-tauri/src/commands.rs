@@ -10,6 +10,158 @@ use crate::theme::{Theme, ThemeExport, THEME_SCHEMA};
 use crate::timer::{CountUpCommand, TimerCommand};
 use crate::watcher::WatcherCommand;
 
+/// Map + filter history events for the UI: newest first, optionally only
+/// the current logical day. Pure so it's unit-testable without disk or state.
+///
+/// The `day` bucket is the event's `ts` shifted by the rollover hour (a 3 AM
+/// clip counts as the previous day for a 4 AM rollover). An unparseable `ts`
+/// is never dropped — it falls back to the leading `YYYY-MM-DD` slice so the
+/// entry still appears somewhere the user can see it.
+pub(crate) fn history_payloads(
+    events: Vec<crate::history::HistoryEvent>,
+    rollover_hour: u8,
+    full: bool,
+    today: &str,
+) -> Vec<HistoryEntryPayload> {
+    events
+        .into_iter()
+        .rev() // newest first (file is oldest-first)
+        .filter_map(|e| {
+            // Bucket by the timestamp's OWN recorded offset (history `ts` is
+            // written in local time) so the day stays stable regardless of the
+            // viewer's current machine timezone. Unparseable → keep the row
+            // with the leading date slice rather than dropping it silently.
+            let day = match chrono::DateTime::parse_from_rfc3339(&e.ts) {
+                Ok(dt) => crate::stats::logical_date_of(dt, rollover_hour),
+                Err(_) => e.ts[..10.min(e.ts.len())].to_string(),
+            };
+            if !full && day != today {
+                return None;
+            }
+            let filename = std::path::Path::new(&e.path)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_string();
+            Some(HistoryEntryPayload {
+                ts: e.ts,
+                event: e.event,
+                path: e.path,
+                old_path: e.old_path,
+                game: e.game,
+                exe: e.exe,
+                key: e.key,
+                rating: e.rating,
+                label: e.label,
+                description: e.description,
+                source: e.source,
+                day,
+                filename,
+            })
+        })
+        .collect()
+}
+
+/// Read the append-only history log and map it for the History panel. Newest
+/// first; `full = false` returns only entries in the current logical day.
+#[tauri::command]
+pub async fn get_history(
+    state: State<'_, AppState>,
+    full: bool,
+) -> Result<Vec<HistoryEntryPayload>, String> {
+    let (config_path, rollover_hour) = {
+        let s = state.lock().map_err(|e| e.to_string())?;
+        (s.config_path.clone(), s.config.day_rollover_hour)
+    };
+    // Disk read off the state lock and off the async workers.
+    tauri::async_runtime::spawn_blocking(move || {
+        let events = crate::history::read_all(&crate::history::history_path(&config_path));
+        let today = crate::stats::logical_today(rollover_hour);
+        history_payloads(events, rollover_hour, full, &today)
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+/// Correct a clip's detected game from the History panel. Updates the session
+/// map, optionally remembers the correction as a detection override, appends a
+/// `game_edited` event to history, and logs the change.
+#[tauri::command]
+pub async fn edit_history_game(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+    game: String,
+    exe: Option<String>,
+    remember: bool,
+) -> Result<(), String> {
+    let game = game.trim().to_string();
+    if game.is_empty() {
+        return Err("game name cannot be empty".to_string());
+    }
+    let clip_path = std::path::PathBuf::from(&path);
+    let filename = clip_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unknown")
+        .to_string();
+
+    // One short critical section: re-key the session game, build the log
+    // entry, and (if remembering) apply the override + snapshot config.
+    let save = {
+        let mut s = state.lock().map_err(|e| e.to_string())?;
+        if s.clip_games.contains_key(&clip_path) {
+            s.clip_games.insert(clip_path.clone(), game.clone());
+        }
+        let remembered = remember && exe.is_some();
+        if remembered {
+            if let Some(exe) = &exe {
+                s.config.remember_game_override(exe, &game);
+            }
+        }
+        let entry = s.logger.log_with_path(
+            LogLevel::Success,
+            format!("Game set to {} for {}", game, filename),
+            LogCategory::System,
+            Some(path.clone()),
+        );
+        let _ = app.emit("log-entry", &entry);
+        if remembered {
+            Some((s.config.clone(), s.config_path.clone()))
+        } else {
+            None
+        }
+    };
+
+    // Config path is needed for the history file even when not remembering.
+    let config_path = {
+        let s = state.lock().map_err(|e| e.to_string())?;
+        s.config_path.clone()
+    };
+
+    // Disk work off the lock: append the history event, and persist config +
+    // emit config-changed when the override was remembered (same save/emit
+    // pattern as do_rename_file).
+    let app2 = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut ev = crate::history::HistoryEvent::new("game_edited", &clip_path, "app")
+            .with_game(&game);
+        if let Some(exe) = &exe {
+            ev = ev.with_exe(exe);
+        }
+        crate::history::append(&crate::history::history_path(&config_path), &ev);
+
+        if let Some((cfg, cfg_path)) = save {
+            if let Err(e) = cfg.save_to(&cfg_path) {
+                log::warn!("Failed to persist game override: {}", e);
+            }
+            let _ = app2.emit("config-changed", &cfg);
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub fn get_config(state: State<'_, AppState>) -> Result<AppConfig, String> {
     let s = state.lock().map_err(|e| e.to_string())?;
@@ -1078,4 +1230,65 @@ pub fn set_window_opacity(opacity: f64, window: tauri::Window) -> Result<(), Str
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::history::HistoryEvent;
+    use std::path::Path;
+
+    fn ev(ts: &str, path: &str) -> HistoryEvent {
+        let mut e = HistoryEvent::new("moved", Path::new(path), "hotkey");
+        e.ts = ts.to_string();
+        e
+    }
+
+    #[test]
+    fn test_history_payloads_buckets_orders_and_filters() {
+        // Rollover 4 AM: 23:59 → same day, 03:59 → previous day, 04:00 → new day.
+        let events = vec![
+            ev("2026-07-12T23:59:00-06:00", "C:/clips/a.mp4"),
+            ev("2026-07-13T03:59:00-06:00", "C:/clips/b.mp4"),
+            ev("2026-07-13T04:00:00-06:00", "C:/clips/c.mp4"),
+        ];
+
+        // full=true keeps all three; newest-first reverses input order.
+        let all = history_payloads(events.clone(), 4, true, "2026-07-12");
+        assert_eq!(all.len(), 3);
+        assert_eq!(all[0].path, "C:/clips/c.mp4");
+        assert_eq!(all[1].path, "C:/clips/b.mp4");
+        assert_eq!(all[2].path, "C:/clips/a.mp4");
+        // Day buckets per the rollover.
+        assert_eq!(all[2].day, "2026-07-12");
+        assert_eq!(all[1].day, "2026-07-12");
+        assert_eq!(all[0].day, "2026-07-13");
+        // Filename derived from the path.
+        assert_eq!(all[0].filename, "c.mp4");
+
+        // full=false, today="2026-07-12": only the first two survive (still
+        // newest-first among the survivors).
+        let today = history_payloads(events, 4, false, "2026-07-12");
+        assert_eq!(today.len(), 2);
+        assert_eq!(today[0].path, "C:/clips/b.mp4");
+        assert_eq!(today[1].path, "C:/clips/a.mp4");
+    }
+
+    #[test]
+    fn test_history_payloads_unparseable_ts_kept_with_prefix_fallback() {
+        let events = vec![ev("not-a-timestamp-value", "C:/clips/weird.mp4")];
+        let out = history_payloads(events, 4, true, "2099-01-01");
+        assert_eq!(out.len(), 1);
+        // Falls back to the leading YYYY-MM-DD slice, never dropped.
+        assert_eq!(out[0].day, "not-a-time");
+        assert_eq!(out[0].filename, "weird.mp4");
+    }
+
+    #[test]
+    fn test_history_payloads_short_ts_fallback_does_not_panic() {
+        let events = vec![ev("bad", "C:/clips/x.mp4")];
+        let out = history_payloads(events, 4, true, "2099-01-01");
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].day, "bad");
+    }
 }
