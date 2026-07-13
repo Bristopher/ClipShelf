@@ -156,6 +156,9 @@ pub fn open(app: &AppHandle, controller: &HotkeyController, state: &AppState) {
 pub fn close(app: &AppHandle, controller: &HotkeyController) {
     hide(app);
     controller.set_overlay_keys(false);
+    // Closing the overlay ALWAYS ends type mode — the LL keyboard hook must
+    // never keep swallowing the game's keystrokes after the overlay is gone.
+    crate::keyhook::stop();
 }
 
 /// Dev/testing command to show the overlay on demand.

@@ -4,6 +4,7 @@ mod events;
 mod gamedetect;
 mod history;
 mod hotkeys;
+mod keyhook;
 mod logger;
 mod mover;
 mod obs_ws;
@@ -683,6 +684,8 @@ pub fn run() {
             overlay::overlay_set_game,
             overlay::overlay_timer_toggle,
             overlay::overlay_needs_label,
+            keyhook::start_type_mode,
+            keyhook::stop_type_mode,
         ])
         .on_window_event(|window, event| {
             match event {
