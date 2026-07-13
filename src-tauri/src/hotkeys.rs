@@ -37,12 +37,14 @@ impl HotkeyController {
     /// If the overlay is open, its temp keys are preserved. Safe to call
     /// from any thread.
     pub fn reload(&self, bindings: Vec<(HotkeyAction, String)>) {
-        let composed = {
-            let mut inner = self.inner.lock().unwrap();
-            inner.base = bindings;
-            compose(&inner)
-        };
-        self.post(composed);
+        // Mutate AND publish while holding the `inner` lock: composing under
+        // the lock but posting after releasing it would let a concurrent
+        // reload/set_overlay_keys publish out of order (e.g. digits staying
+        // registered after the overlay closed). Lock order is always
+        // inner → pending; nothing acquires them the other way.
+        let mut inner = self.inner.lock().unwrap();
+        inner.base = bindings;
+        self.post(compose(&inner));
     }
 
     /// Toggle the overlay's temporary keys. When `active`, the listener ALSO
@@ -51,17 +53,18 @@ impl HotkeyController {
     /// if the flag already matches, so re-opening/re-closing doesn't churn
     /// the base registrations.
     pub fn set_overlay_keys(&self, active: bool) {
-        let composed = {
-            let mut inner = self.inner.lock().unwrap();
-            if inner.overlay_active == active {
-                return;
-            }
-            inner.overlay_active = active;
-            compose(&inner)
-        };
-        self.post(composed);
+        // Same atomicity requirement as `reload` — see comment there.
+        let mut inner = self.inner.lock().unwrap();
+        if inner.overlay_active == active {
+            return;
+        }
+        inner.overlay_active = active;
+        self.post(compose(&inner));
     }
 
+    /// Publish a composed bind list to the listener thread. Callers MUST hold
+    /// the `inner` lock for the duration of this call so mutation + publish
+    /// is one atomic step (inner → pending is the only lock order).
     fn post(&self, composed: Vec<(HotkeyAction, String)>) {
         *self.pending.lock().unwrap() = Some(composed);
         unsafe {

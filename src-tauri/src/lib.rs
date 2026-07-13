@@ -679,8 +679,15 @@ pub fn run() {
         .on_window_event(|window, event| {
             match event {
                 tauri::WindowEvent::CloseRequested { api, .. } => {
-                    // Hide window instead of closing (minimize to tray)
-                    let _ = window.hide();
+                    // Hide window instead of closing (minimize to tray). The
+                    // overlay routes through overlay::close so its temporary
+                    // digit/Esc hotkeys are ALWAYS released with the window.
+                    if window.label() == overlay::LABEL {
+                        let channels = window.app_handle().state::<ChannelState>();
+                        overlay::close(window.app_handle(), &channels.hotkey_controller);
+                    } else {
+                        let _ = window.hide();
+                    }
                     api.prevent_close();
                 }
                 // Remember the main window's layout (debounced).
