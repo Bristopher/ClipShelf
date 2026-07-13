@@ -48,9 +48,21 @@ function fmtDay(day: string): string {
     : d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
 }
 
-/** Row key unique enough for React + edit-state tracking (ts+path is unique per event). */
-function rowKey(e: HistoryEntry): string {
-  return `${e.ts}|${e.path}`;
+/**
+ * Row identity for React keys + edit-state targeting. A clip path recurs
+ * across events (created → game_edited on the same clip is a normal flow)
+ * and ts alone isn't guaranteed unique, so the group-local render index
+ * disambiguates. Grouping is deterministic per fetch, so the key is stable
+ * until the next refetch — long enough for an edit interaction.
+ */
+function rowKey(e: HistoryEntry, index: number): string {
+  return `${e.path}|${e.ts}|${index}`;
+}
+
+/** Context-menu state: shared x/y/path plus the exact row it was opened on. */
+interface HistoryMenuState extends ContextMenuState {
+  rowKey: string;
+  entry: HistoryEntry;
 }
 
 /** Group entries by `game ?? "No game detected"`, groups sorted by count desc. */
@@ -86,10 +98,17 @@ export function HistoryPanelButton({ onRestore, dayRolloverHour }: HistoryPanelB
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<ViewMode>("today");
   const [entries, setEntries] = useState<HistoryEntry[] | null>(null);
-  const [menu, setMenu] = useState<ContextMenuState | null>(null);
+  const [menu, setMenu] = useState<HistoryMenuState | null>(null);
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   const wrapRef = useRef<HTMLDivElement>(null);
+  // Live mirror of `menu` so the panel's [open]-keyed Esc handler can defer
+  // to the context menu without re-registering on every menu change.
+  const menuRef = useRef<HistoryMenuState | null>(null);
+  menuRef.current = menu;
+  // Set when a mousedown just closed the context menu — the click that
+  // follows must NOT fire the row's reveal action.
+  const menuJustClosedRef = useRef(false);
 
   const load = (full: boolean) => {
     getHistory(full)
@@ -101,12 +120,21 @@ export function HistoryPanelButton({ onRestore, dayRolloverHour }: HistoryPanelB
     if (!open) return;
     load(view === "all");
     const onDown = (e: MouseEvent) => {
+      // This listener registered before the menu's (panel opens first), so
+      // it runs first on each mousedown — clear any stale suppression flag
+      // before the menu's close handler may set it for THIS mousedown.
+      menuJustClosedRef.current = false;
+      // While a context menu is open, a mousedown outside it closes the
+      // MENU (via its own [menu] effect), not the panel.
+      if (menuRef.current) return;
       if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
         setOpen(false);
       }
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
+      // Esc closes the context menu first (its own [menu] effect handles
+      // that); only close the panel when no menu is open.
+      if (e.key === "Escape" && !menuRef.current) setOpen(false);
     };
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
@@ -116,6 +144,26 @@ export function HistoryPanelButton({ onRestore, dayRolloverHour }: HistoryPanelB
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+
+  // Context menu closes on any mousedown elsewhere or Esc — same idiom as
+  // EventLog's [menu]-keyed effect. The EntryContextMenu itself swallows
+  // mousedown inside it so item clicks still land.
+  useEffect(() => {
+    if (!menu) return;
+    const close = () => {
+      menuJustClosedRef.current = true;
+      setMenu(null);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenu(null);
+    };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [menu]);
 
   const switchView = (v: ViewMode) => {
     setView(v);
@@ -127,11 +175,6 @@ export function HistoryPanelButton({ onRestore, dayRolloverHour }: HistoryPanelB
     restoreLog()
       .then(onRestore)
       .catch((e) => toastError(`Restore failed: ${errorMessage(e)}`));
-  };
-
-  const startEdit = (e: HistoryEntry) => {
-    setEditingKey(rowKey(e));
-    setEditValue(e.game ?? "");
   };
 
   const saveEdit = (e: HistoryEntry, remember: boolean) => {
@@ -149,18 +192,25 @@ export function HistoryPanelButton({ onRestore, dayRolloverHour }: HistoryPanelB
       .catch((err) => toastError(errorMessage(err)));
   };
 
-  const renderRow = (e: HistoryEntry) => {
-    const key = rowKey(e);
+  const renderRow = (e: HistoryEntry, index: number) => {
+    const key = rowKey(e, index);
     const badge = badgeFor(e.event);
     const editing = editingKey === key;
     return (
       <div key={key} className="rounded px-1.5 py-1 hover:bg-hover">
         <div
           className="flex items-center gap-2 text-xs cursor-pointer"
-          onClick={() => revealInExplorer(e.path).catch((err) => toastError(errorMessage(err)))}
+          onClick={() => {
+            // The click that closed a context menu must not also reveal.
+            if (menuJustClosedRef.current) {
+              menuJustClosedRef.current = false;
+              return;
+            }
+            revealInExplorer(e.path).catch((err) => toastError(errorMessage(err)));
+          }}
           onContextMenu={(ev) => {
             ev.preventDefault();
-            setMenu({ x: ev.clientX, y: ev.clientY, path: e.path });
+            setMenu({ x: ev.clientX, y: ev.clientY, path: e.path, rowKey: key, entry: e });
           }}
         >
           <span className={`shrink-0 w-20 ${badge.className}`}>{badge.label}</span>
@@ -184,7 +234,12 @@ export function HistoryPanelButton({ onRestore, dayRolloverHour }: HistoryPanelB
               value={editValue}
               onChange={(ev) => setEditValue(ev.target.value)}
               onKeyDown={(ev) => {
-                if (ev.key === "Escape") setEditingKey(null);
+                if (ev.key === "Escape") {
+                  // Cancel the edit only — don't let the document-level
+                  // Esc listener also close the whole panel.
+                  ev.stopPropagation();
+                  setEditingKey(null);
+                }
                 if (ev.key === "Enter") saveEdit(e, false);
               }}
               className="h-6 text-xs flex-1 min-w-0"
@@ -303,8 +358,10 @@ export function HistoryPanelButton({ onRestore, dayRolloverHour }: HistoryPanelB
             {
               label: "Edit game…",
               action: () => {
-                const e = entries?.find((x) => x.path === menu.path);
-                if (e) startEdit(e);
+                // Target the exact row the menu was opened on — path alone
+                // is ambiguous when a clip has multiple history events.
+                setEditingKey(menu.rowKey);
+                setEditValue(menu.entry.game ?? "");
               },
             },
           ]}
