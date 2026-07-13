@@ -203,6 +203,24 @@ pub async fn edit_history_game(
     exe: Option<String>,
     remember: bool,
 ) -> Result<(), String> {
+    edit_game_core(&app, state.inner(), path, game, exe, remember, "app").await
+}
+
+/// Shared core for correcting/assigning a clip's game. Re-keys the session
+/// game map, optionally remembers a per-exe detection override, appends a
+/// `game_edited` history event, and logs. `source` distinguishes the History
+/// panel ("app") from the in-game overlay ("overlay"). Extracted so the
+/// overlay's set-game command reuses this exact logic instead of duplicating
+/// the lock/save/history dance.
+pub(crate) async fn edit_game_core(
+    app: &AppHandle,
+    state: &AppState,
+    path: String,
+    game: String,
+    exe: Option<String>,
+    remember: bool,
+    source: &str,
+) -> Result<(), String> {
     let game = game.trim().to_string();
     if game.is_empty() {
         return Err("game name cannot be empty".to_string());
@@ -248,8 +266,9 @@ pub async fn edit_history_game(
     // emit config-changed when the override was remembered (same save/emit
     // pattern as do_rename_file).
     let app2 = app.clone();
+    let source = source.to_string();
     tauri::async_runtime::spawn_blocking(move || {
-        let mut ev = crate::history::HistoryEvent::new("game_edited", &clip_path, "app")
+        let mut ev = crate::history::HistoryEvent::new("game_edited", &clip_path, &source)
             .with_game(&game);
         if let Some(exe) = &exe {
             ev = ev.with_exe(exe);
@@ -366,14 +385,16 @@ pub fn update_config(
 
 #[tauri::command]
 pub fn press_gkey(key: u8, state: State<'_, AppState>, app: AppHandle) -> Result<(), String> {
-    do_press_gkey(&app, state.inner(), key);
+    do_press_gkey(&app, state.inner(), key, "hotkey");
     Ok(())
 }
 
 /// Core G-key move/rename logic. A free function (not just a command) so the
 /// global hotkey handler can invoke it directly in Rust — a hotkey must work
-/// even while the webview is still loading or wedged.
-pub fn do_press_gkey(app: &AppHandle, state: &AppState, key: u8) {
+/// even while the webview is still loading or wedged. `source` tags the
+/// history event ("hotkey" for the key press, "overlay" for the overlay's
+/// sort button) — the move/log/undo behavior is otherwise identical.
+pub fn do_press_gkey(app: &AppHandle, state: &AppState, key: u8, source: &str) {
     let Ok(mut s) = state.lock() else { return };
     let gkey_label = format!("G{}", key);
     s.bind_chosen = Some(gkey_label.clone());
@@ -421,7 +442,7 @@ pub fn do_press_gkey(app: &AppHandle, state: &AppState, key: u8) {
     let config = s.config.clone();
     drop(s); // Release lock before file operations
 
-    if let Some(mv) = move_file_with_key(app, state, &file_path, key, &gkey_label, &config, "hotkey") {
+    if let Some(mv) = move_file_with_key(app, state, &file_path, key, &gkey_label, &config, source) {
         if let Ok(mut s) = state.lock() {
             s.push_undo(crate::state::UndoEntry { moves: vec![mv] });
         }
@@ -452,12 +473,10 @@ fn move_file_with_key(
                 moved_path: None,
             });
             s.record_gkey_move(key, result.new_path.clone());
-            // Carry the clip's detected game across the move so later
-            // rate/label/undo events still know it. Re-key the session map.
-            let game = s.clip_games.remove(file_path);
-            if let Some(g) = &game {
-                s.clip_games.insert(result.new_path.clone(), g.clone());
-            }
+            // Carry the clip's detected game (and exe) across the move so
+            // later rate/label/undo events still know it. Re-keys both
+            // session maps in lockstep.
+            let game = s.rekey_clip(file_path, result.new_path.clone());
             let mode = if config.disable_file_movesorting {
                 "renamed"
             } else {
@@ -741,11 +760,8 @@ fn do_rename_file(app: &AppHandle, state: &AppState, text: &str) {
                 path: result.new_path.clone(),
                 moved_path: Some(result.new_path.clone()),
             });
-            // Carry the clip's detected game across the rename.
-            let game = s.clip_games.remove(&file_path);
-            if let Some(g) = &game {
-                s.clip_games.insert(result.new_path.clone(), g.clone());
-            }
+            // Carry the clip's detected game (and exe) across the rename.
+            let game = s.rekey_clip(&file_path, result.new_path.clone());
             s.push_undo(crate::state::UndoEntry {
                 moves: vec![crate::state::UndoMove {
                     from: result.original_path.clone(),
@@ -881,12 +897,10 @@ pub fn do_undo(app: &AppHandle, state: &AppState) {
                         undone_name, restored_name
                     ));
                 }
-                // Carry the game back to the restored path, then record the
-                // undo in history (best-effort, after the lock is dropped).
-                let game = s.clip_games.remove(&mv.to);
-                if let Some(g) = &game {
-                    s.clip_games.insert(restored.clone(), g.clone());
-                }
+                // Carry the game (and exe) back to the restored path, then
+                // record the undo in history (best-effort, after the lock is
+                // dropped).
+                let game = s.rekey_clip(&mv.to, restored.clone());
                 let config_path = s.config_path.clone();
                 drop(s);
                 let mut ev = crate::history::HistoryEvent::new("undone", &restored, "app")

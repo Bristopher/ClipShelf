@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 use tokio::sync::mpsc;
@@ -95,6 +95,12 @@ pub struct AppStateInner {
     /// Session map: clip's CURRENT path → detected game. Kept in sync on
     /// move/rename so rate/label events after sorting still carry the game.
     pub clip_games: HashMap<PathBuf, String>,
+
+    /// Session map parallel to `clip_games`: clip's CURRENT path → detected
+    /// exe stem. Maintained at the exact same re-key sites (create/move/
+    /// rename/undo) so the overlay's "set game" can remember a per-exe
+    /// detection override for a clip whose game was never auto-detected.
+    pub clip_exes: HashMap<PathBuf, String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -137,7 +143,24 @@ impl AppStateInner {
             daily_stats,
             pending_game: None,
             clip_games: HashMap::new(),
+            clip_exes: HashMap::new(),
         }
+    }
+
+    /// Re-key both session maps when a clip moves `from` → `to`. Keeps
+    /// `clip_games` and `clip_exes` in lockstep at every move/rename/undo
+    /// site — the single place that transfers a clip's identity so no site
+    /// can update one map and forget the other. Returns the carried game so
+    /// the caller can attach it to the history event it's already building.
+    pub fn rekey_clip(&mut self, from: &Path, to: PathBuf) -> Option<String> {
+        let game = self.clip_games.remove(from);
+        if let Some(g) = &game {
+            self.clip_games.insert(to.clone(), g.clone());
+        }
+        if let Some(exe) = self.clip_exes.remove(from) {
+            self.clip_exes.insert(to, exe);
+        }
+        game
     }
 
     /// Consume the pending game snapshot if it's fresh enough. A snapshot
@@ -327,6 +350,36 @@ mod tests {
             resolve_clip_current_path(&cg2, &undo_stack2, &a_created),
             Some(a_final)
         );
+    }
+
+    #[test]
+    fn test_rekey_clip_moves_game_and_exe_in_lockstep() {
+        let mut s = AppStateInner::new(AppConfig::default(), PathBuf::new());
+        let a = PathBuf::from("C:/clips/a.mp4");
+        let b = PathBuf::from("C:/clips/sorted/a !!.mp4");
+        s.clip_games.insert(a.clone(), "Halo".into());
+        s.clip_exes.insert(a.clone(), "halo".into());
+
+        // Move A → B: both maps re-key together, old keys gone.
+        let carried = s.rekey_clip(&a, b.clone());
+        assert_eq!(carried.as_deref(), Some("Halo"));
+        assert!(!s.clip_games.contains_key(&a));
+        assert!(!s.clip_exes.contains_key(&a));
+        assert_eq!(s.clip_games.get(&b).map(String::as_str), Some("Halo"));
+        assert_eq!(s.clip_exes.get(&b).map(String::as_str), Some("halo"));
+
+        // Re-key a clip with an exe but no game: exe still transfers, game None.
+        let c = PathBuf::from("C:/clips/c.mp4");
+        let d = PathBuf::from("C:/clips/c - clutch.mp4");
+        s.clip_exes.insert(c.clone(), "cs2".into());
+        let carried = s.rekey_clip(&c, d.clone());
+        assert_eq!(carried, None);
+        assert!(!s.clip_exes.contains_key(&c));
+        assert_eq!(s.clip_exes.get(&d).map(String::as_str), Some("cs2"));
+
+        // Re-key an untracked path: no-op, no panic.
+        let ghost = PathBuf::from("C:/clips/ghost.mp4");
+        assert_eq!(s.rekey_clip(&ghost, PathBuf::from("C:/x.mp4")), None);
     }
 
     #[test]

@@ -53,14 +53,8 @@ impl HistoryEvent {
     pub fn with_exe(mut self, exe: &str) -> Self { self.exe = Some(exe.to_string()); self }
     pub fn with_old_path(mut self, p: &Path) -> Self { self.old_path = Some(p.to_string_lossy().to_string()); self }
     pub fn with_key(mut self, key: u8) -> Self { self.key = Some(key); self }
-    // consumed in Phase 2/3 (rate/label/describe events)
-    #[allow(dead_code)]
     pub fn with_rating(mut self, stars: u8) -> Self { self.rating = Some(stars); self }
-    // consumed in Phase 2/3 (rate/label/describe events)
-    #[allow(dead_code)]
     pub fn with_label(mut self, label: &str) -> Self { self.label = Some(label.to_string()); self }
-    // consumed in Phase 2/3 (rate/label/describe events)
-    #[allow(dead_code)]
     pub fn with_description(mut self, d: &str) -> Self { self.description = Some(d.to_string()); self }
 }
 

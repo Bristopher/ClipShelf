@@ -11,11 +11,7 @@ use std::time::Duration;
 /// One property to mirror onto the file.
 pub enum PropValue {
     Game(String),
-    // consumed in Phase 2/3 (rating mirror)
-    #[allow(dead_code)]
     Stars(u8),
-    // consumed in Phase 2/3 (description mirror)
-    #[allow(dead_code)]
     Description(String),
 }
 

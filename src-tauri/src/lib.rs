@@ -331,7 +331,7 @@ pub fn run() {
                                 let app = app_handle.clone();
                                 let st = state.clone();
                                 tauri::async_runtime::spawn_blocking(move || {
-                                    commands::do_press_gkey(&app, &st, key);
+                                    commands::do_press_gkey(&app, &st, key, "hotkey");
                                 });
                             }
                             HotkeyAction::Rename => {
@@ -675,6 +675,14 @@ pub fn run() {
             commands::edit_history_game,
             overlay::show_overlay,
             overlay::hide_overlay,
+            overlay::overlay_get_context,
+            overlay::overlay_sort,
+            overlay::overlay_rate,
+            overlay::overlay_label,
+            overlay::overlay_describe,
+            overlay::overlay_set_game,
+            overlay::overlay_timer_toggle,
+            overlay::overlay_needs_label,
         ])
         .on_window_event(|window, event| {
             match event {
@@ -853,6 +861,12 @@ async fn handle_file_created(
         let mut s = state.lock().unwrap();
         if let Some(g) = &game {
             s.clip_games.insert(path.clone(), g.clone());
+        }
+        // Parallel exe map — kept in lockstep with clip_games at this and
+        // every re-key site (via rekey_clip) so the overlay's set-game can
+        // remember a per-exe override for this clip later.
+        if let Some(snap) = &game_snap {
+            s.clip_exes.insert(path.clone(), snap.exe_stem.clone());
         }
         let mut e = history::HistoryEvent::new("created", &path, "app");
         if let Some(g) = &game {

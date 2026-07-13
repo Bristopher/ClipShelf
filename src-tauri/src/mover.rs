@@ -210,6 +210,47 @@ pub fn rename_file_with_text(file_path: &Path, text: &str) -> Result<MoveResult,
     })
 }
 
+/// Build the labeled filename target for a clip: `{stem} - {label}{ext}` in
+/// the same directory. Pure (no disk touch, no collision handling) so the
+/// naming is unit-testable on its own; the collision-safe rename is applied
+/// separately via `rename_file_at`. The label is trimmed — a UI chip or typed
+/// value with stray spaces still yields a clean name.
+pub(crate) fn labeled_name(path: &Path, label: &str) -> PathBuf {
+    let label = label.trim();
+    let parent = path.parent().map(Path::to_path_buf).unwrap_or_default();
+    let stem = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("clip");
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| format!(".{}", e))
+        .unwrap_or_default();
+    parent.join(format!("{} - {}{}", stem, label, ext))
+}
+
+/// Rename `from` to a precomputed `target`, applying the same collision-safe
+/// machinery as the G-key/rename paths (`unique_destination` guards against
+/// clobbering an existing file, `rename_with_retry` waits out a still-open
+/// handle). Used by the overlay's label action with a `labeled_name` target.
+pub fn rename_file_at(from: &Path, target: &Path) -> Result<MoveResult, String> {
+    if !from.exists() {
+        return Err(format!("File does not exist: {}", from.display()));
+    }
+    if let Some(parent) = target.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create directory: {}", e))?;
+    }
+    let new_path = unique_destination(target);
+    rename_with_retry(from, &new_path)?;
+    Ok(MoveResult {
+        original_path: from.to_path_buf(),
+        new_path,
+        tag_applied: String::new(),
+    })
+}
+
 /// Restore a previously moved/renamed file back to where it came from.
 /// Used by undo. Collision-safe: if the original name has been re-taken
 /// (e.g. OBS saved a new clip with the same timestamp), the restored file
@@ -398,6 +439,41 @@ mod tests {
         );
         // Original tagged file untouched.
         assert_eq!(std::fs::read(&taken).unwrap(), b"precious");
+    }
+
+    #[test]
+    fn test_labeled_name_preserves_extension() {
+        let out = labeled_name(Path::new("C:/clips/Replay 2026-04-15.mp4"), "clutch");
+        assert_eq!(out, PathBuf::from("C:/clips/Replay 2026-04-15 - clutch.mp4"));
+    }
+
+    #[test]
+    fn test_labeled_name_no_extension() {
+        let out = labeled_name(Path::new("C:/clips/rawclip"), "ace");
+        assert_eq!(out, PathBuf::from("C:/clips/rawclip - ace"));
+    }
+
+    #[test]
+    fn test_labeled_name_trims_label() {
+        let out = labeled_name(Path::new("C:/clips/a.mp4"), "  funny  ");
+        assert_eq!(out, PathBuf::from("C:/clips/a - funny.mp4"));
+    }
+
+    #[test]
+    fn test_rename_file_at_collision_safe() {
+        let dir = tempdir().expect("tempdir");
+        let file_path = dir.path().join("clip.mp4");
+        std::fs::File::create(&file_path).unwrap();
+        // A prior labeled clip already owns the target name.
+        let taken = dir.path().join("clip - clutch.mp4");
+        std::fs::write(&taken, b"precious").unwrap();
+
+        let target = labeled_name(&file_path, "clutch");
+        let result = rename_file_at(&file_path, &target).expect("rename failed");
+
+        assert!(!file_path.exists(), "original should be gone");
+        assert_eq!(result.new_path, dir.path().join("clip - clutch (2).mp4"));
+        assert_eq!(std::fs::read(&taken).unwrap(), b"precious", "existing untouched");
     }
 
     #[test]
