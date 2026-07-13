@@ -237,9 +237,11 @@ pub(crate) async fn edit_game_core(
     // not remembering), and (if remembering) apply the override + config.
     let (save, config_path) = {
         let mut s = state.lock().map_err(|e| e.to_string())?;
-        if s.clip_games.contains_key(&clip_path) {
-            s.clip_games.insert(clip_path.clone(), game.clone());
-        }
+        // Insert-or-update (not just update): setting a game on a clip that
+        // never had one detected REGISTERS it in the session map, so a
+        // following rate/describe mirrors via the identity chain and
+        // overlay_get_context shows the new game.
+        s.clip_games.insert(clip_path.clone(), game.clone());
         let remembered = remember && exe.is_some();
         if remembered {
             if let Some(exe) = &exe {

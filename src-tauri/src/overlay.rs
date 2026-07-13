@@ -526,6 +526,17 @@ pub fn overlay_needs_label(app: AppHandle, state: State<'_, AppState>) -> Result
     Ok(())
 }
 
+/// Combine identity resolution with the acting-path fallback for the overlay's
+/// rate/describe property mirror. The identity chain (clip_games/undo_stack)
+/// stays PRIMARY — it follows a clip sorted mid-write. But a clip with no
+/// detected game never enters clip_games, so identity resolution returns None
+/// even though the file sits untouched at the acting path; stars/description
+/// must still mirror onto it. Fall back to the acting path only when it still
+/// exists on disk (a moved-but-identity-less clip stays a skip — never guess).
+fn with_acting_fallback(resolved: Option<PathBuf>, acting: &std::path::Path) -> Option<PathBuf> {
+    resolved.or_else(|| acting.exists().then(|| acting.to_path_buf()))
+}
+
 /// Shared property-mirror helper for rate/describe: probe-then-write with the
 /// identity-resolving closure (follows a clip sorted mid-write, never guesses
 /// the newest clip), surfacing a skip warning to the UI exactly like the
@@ -538,8 +549,12 @@ fn write_prop_resolving(
 ) {
     let acting = acting.to_path_buf();
     let resolve = || -> Option<PathBuf> {
-        let s = state.lock().ok()?;
-        crate::state::resolve_clip_current_path(&s.clip_games, &s.undo_stack, &acting)
+        let resolved = {
+            let s = state.lock().ok()?;
+            crate::state::resolve_clip_current_path(&s.clip_games, &s.undo_stack, &acting)
+        };
+        // Lock dropped before the fallback's exists() disk probe.
+        with_acting_fallback(resolved, &acting)
     };
     if let Err(msg) = crate::props::write_with_retry_resolving(
         resolve,
@@ -556,5 +571,44 @@ fn write_prop_resolving(
             );
             let _ = app.emit("log-entry", &entry);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_with_acting_fallback_identity_wins() {
+        // Identity resolution succeeded — its answer is used even if the
+        // acting path also exists (the chain follows a mid-write sort).
+        let dir = tempfile::tempdir().unwrap();
+        let acting = dir.path().join("acting.mp4");
+        std::fs::write(&acting, b"stub").unwrap();
+        let resolved = PathBuf::from("C:/clips/sorted/acting !!.mp4");
+        assert_eq!(
+            with_acting_fallback(Some(resolved.clone()), &acting),
+            Some(resolved)
+        );
+    }
+
+    #[test]
+    fn test_with_acting_fallback_identityless_existing_clip() {
+        // No identity (game never detected) but the file is still there —
+        // rate/describe must mirror onto the acting path.
+        let dir = tempfile::tempdir().unwrap();
+        let acting = dir.path().join("no-game.mp4");
+        std::fs::write(&acting, b"stub").unwrap();
+        assert_eq!(with_acting_fallback(None, &acting), Some(acting));
+    }
+
+    #[test]
+    fn test_with_acting_fallback_missing_file_stays_skip() {
+        // No identity AND the acting path is gone (clip moved away without a
+        // chain) — skip, never guess another file.
+        assert_eq!(
+            with_acting_fallback(None, std::path::Path::new("C:/nope/gone.mp4")),
+            None
+        );
     }
 }
