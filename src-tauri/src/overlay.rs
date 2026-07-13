@@ -8,7 +8,12 @@
 //! actual G-key feedback UI into `OverlayApp.tsx`; this task only builds the
 //! window plumbing.
 
-use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWindowBuilder};
+use tauri::{
+    AppHandle, Emitter, Manager, PhysicalPosition, State, WebviewUrl, WebviewWindowBuilder,
+};
+
+use crate::hotkeys::HotkeyController;
+use crate::state::{AppState, ChannelState};
 
 /// Window label for the overlay webview.
 pub const LABEL: &str = "overlay";
@@ -112,14 +117,56 @@ fn target_position(window: &tauri::WebviewWindow) -> Option<(i32, i32)> {
     Some((x, y))
 }
 
-/// Dev/testing command to show the overlay on demand.
-#[tauri::command]
-pub fn show_overlay(app: AppHandle) {
-    show(&app);
+/// Open the overlay: show the window, register the temporary digit/Esc keys,
+/// and emit `overlay-open` with the current clip's filename + detected game
+/// (read under a short state lock). Every path that reveals the overlay goes
+/// through here so key registration and the open event stay symmetric.
+pub fn open(app: &AppHandle, controller: &HotkeyController, state: &AppState) {
+    show(app);
+    controller.set_overlay_keys(true);
+
+    let (filename, game) = {
+        let s = state.lock().unwrap();
+        let filename = s
+            .current_file
+            .as_ref()
+            .and_then(|f| f.path.file_name())
+            .and_then(|n| n.to_str())
+            .map(|n| n.to_string());
+        let game = s
+            .current_file
+            .as_ref()
+            .and_then(|f| s.clip_games.get(&f.path).cloned());
+        (filename, game)
+    };
+
+    let _ = app.emit(
+        "overlay-open",
+        serde_json::json!({ "filename": filename, "game": game }),
+    );
 }
 
-/// Dev/testing command to hide the overlay on demand.
+/// Close the overlay: hide the window and release the temporary keys. Used by
+/// the toggle arm, the Esc sentinel arm, and the `hide_overlay` command so
+/// the temp keys are ALWAYS released whenever the overlay goes away.
+pub fn close(app: &AppHandle, controller: &HotkeyController) {
+    hide(app);
+    controller.set_overlay_keys(false);
+}
+
+/// Dev/testing command to show the overlay on demand.
 #[tauri::command]
-pub fn hide_overlay(app: AppHandle) {
-    hide(&app);
+pub fn show_overlay(
+    app: AppHandle,
+    channels: State<'_, ChannelState>,
+    state: State<'_, AppState>,
+) {
+    open(&app, &channels.hotkey_controller, state.inner());
+}
+
+/// Dev/testing command to hide the overlay on demand. Routed through `close`
+/// so it releases the temporary overlay keys too.
+#[tauri::command]
+pub fn hide_overlay(app: AppHandle, channels: State<'_, ChannelState>) {
+    close(&app, &channels.hotkey_controller);
 }

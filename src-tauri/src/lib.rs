@@ -180,6 +180,11 @@ pub fn run() {
                 config.obs_websocket_password.clone(),
             );
 
+            // Clone the controller for the hotkey-action handler task (the
+            // OverlayToggle/OverlayKey arms register/release the temp keys);
+            // the original moves into ChannelState for the update_config path.
+            let hotkey_controller_for_handler = hotkey_controller.clone();
+
             // Create ChannelState
             let channel_state = ChannelState {
                 user_timer_tx: user_timer_tx.clone(),
@@ -307,6 +312,7 @@ pub fn run() {
                 let state = app_state.clone();
                 let timer_tx = timer_tx.clone();
                 let count_up_tx = count_up_tx.clone();
+                let controller = hotkey_controller_for_handler;
 
                 tauri::async_runtime::spawn(async move {
                     while let Some(action) = hotkey_rx.recv().await {
@@ -384,6 +390,30 @@ pub fn run() {
                                     watcher_tx.clone(),
                                     timer_tx.clone(),
                                 );
+                            }
+                            HotkeyAction::OverlayToggle => {
+                                // Toggle on visibility: if the overlay is up,
+                                // close it (hide + release temp keys); else
+                                // open it (show + register temp keys + emit).
+                                let visible = app_handle
+                                    .get_webview_window("overlay")
+                                    .and_then(|w| w.is_visible().ok())
+                                    .unwrap_or(false);
+                                if visible {
+                                    overlay::close(&app_handle, &controller);
+                                } else {
+                                    overlay::open(&app_handle, &controller, &state);
+                                }
+                            }
+                            // Esc sentinel closes the overlay, symmetric with
+                            // the toggle's close path.
+                            HotkeyAction::OverlayKey(10) => {
+                                overlay::close(&app_handle, &controller);
+                            }
+                            // Digit selections (1-9, 0) are handed to the
+                            // overlay webview to interpret.
+                            HotkeyAction::OverlayKey(n) => {
+                                let _ = app_handle.emit("overlay-key", n);
                             }
                         }
                     }

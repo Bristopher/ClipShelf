@@ -11,24 +11,85 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 /// Values >= WM_USER are reserved for application use.
 const WM_HOTKEY_RELOAD: u32 = WM_USER + 1;
 
+/// The controller's own view of what should currently be registered: the
+/// full "base" bind list (G-keys, rename, overlay toggle, ...) plus whether
+/// the overlay is open (which adds the temporary digit/Esc keys). Both
+/// `reload` and `set_overlay_keys` mutate this, recompose the effective list,
+/// and hand it to the listener thread.
+struct ControllerInner {
+    base: Vec<(HotkeyAction, String)>,
+    overlay_active: bool,
+}
+
 /// Lets other threads swap the registered hotkeys at runtime. Cloned
 /// freely; all clones target the same listener thread.
 #[derive(Clone)]
 pub struct HotkeyController {
     thread_id: u32,
+    inner: Arc<Mutex<ControllerInner>>,
     pending: Arc<Mutex<Option<Vec<(HotkeyAction, String)>>>>,
 }
 
 impl HotkeyController {
-    /// Replace the current bindings. The listener thread will unregister
-    /// all old hotkeys and register the new set on its next message-pump
-    /// iteration. Safe to call from any thread.
+    /// Replace the current BASE bindings (everything except the overlay's
+    /// temporary digit keys). The listener thread will unregister all old
+    /// hotkeys and register the new set on its next message-pump iteration.
+    /// If the overlay is open, its temp keys are preserved. Safe to call
+    /// from any thread.
     pub fn reload(&self, bindings: Vec<(HotkeyAction, String)>) {
-        *self.pending.lock().unwrap() = Some(bindings);
+        let composed = {
+            let mut inner = self.inner.lock().unwrap();
+            inner.base = bindings;
+            compose(&inner)
+        };
+        self.post(composed);
+    }
+
+    /// Toggle the overlay's temporary keys. When `active`, the listener ALSO
+    /// registers plain "1".."9", "0", and Esc mapped to `OverlayKey(..)`;
+    /// when inactive those are unregistered (base binds untouched). A no-op
+    /// if the flag already matches, so re-opening/re-closing doesn't churn
+    /// the base registrations.
+    pub fn set_overlay_keys(&self, active: bool) {
+        let composed = {
+            let mut inner = self.inner.lock().unwrap();
+            if inner.overlay_active == active {
+                return;
+            }
+            inner.overlay_active = active;
+            compose(&inner)
+        };
+        self.post(composed);
+    }
+
+    fn post(&self, composed: Vec<(HotkeyAction, String)>) {
+        *self.pending.lock().unwrap() = Some(composed);
         unsafe {
             PostThreadMessageW(self.thread_id, WM_HOTKEY_RELOAD, 0, 0);
         }
     }
+}
+
+/// Compose the effective bind list = base + (overlay temp keys if active).
+fn compose(inner: &ControllerInner) -> Vec<(HotkeyAction, String)> {
+    let mut list = inner.base.clone();
+    if inner.overlay_active {
+        list.extend(overlay_temp_bindings());
+    }
+    list
+}
+
+/// The temporary keys registered while the overlay is open: bare digits
+/// "1".."9" → `OverlayKey(1..=9)`, "0" → `OverlayKey(0)`, and "escape" →
+/// `OverlayKey(10)` (the Esc sentinel that closes the overlay). Bare keys
+/// (no modifier) — they only exist while the overlay panel is up.
+pub fn overlay_temp_bindings() -> Vec<(HotkeyAction, String)> {
+    let mut v: Vec<(HotkeyAction, String)> = (1u8..=9)
+        .map(|n| (HotkeyAction::OverlayKey(n), n.to_string()))
+        .collect();
+    v.push((HotkeyAction::OverlayKey(0), "0".to_string()));
+    v.push((HotkeyAction::OverlayKey(10), "escape".to_string()));
+    v
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -47,6 +108,12 @@ pub enum HotkeyAction {
     CountUpToggle,
     /// Undo the last move/rename.
     Undo,
+    /// Show/hide the in-game overlay. User-configured global bind.
+    OverlayToggle,
+    /// A key pressed while the overlay is open. `1..=9` and `0` are the digit
+    /// selections; `10` is the Esc sentinel (closes the overlay). These are
+    /// registered as bare temporary hotkeys only while the overlay is up.
+    OverlayKey(u8),
 }
 
 impl HotkeyAction {
@@ -61,6 +128,8 @@ impl HotkeyAction {
             HotkeyAction::SaveClipHealthCheck => "Save-clip health check",
             HotkeyAction::CountUpToggle => "Count-up toggle",
             HotkeyAction::Undo => "Undo",
+            HotkeyAction::OverlayToggle => "Overlay toggle",
+            HotkeyAction::OverlayKey(_) => "Overlay key",
         }
     }
 }
@@ -86,7 +155,10 @@ pub struct HotkeyBinding {
 
 pub fn parse_hotkey(binding: &str) -> Result<HotkeyBinding, String> {
     let parts: Vec<&str> = binding.split('+').collect();
-    if parts.len() < 2 {
+    // A bare single key (no modifier) is valid — the overlay's temporary keys
+    // register plain "1".."9"/"0"/"escape". The last part is always the key
+    // name; an empty key name still fails below via key_name_to_vk.
+    if binding.is_empty() {
         return Err(format!("Invalid hotkey binding: '{}'", binding));
     }
 
@@ -156,6 +228,7 @@ pub fn key_name_to_vk(name: &str) -> Result<u32, String> {
         "f24" => Ok(0x87),
         // Common named keys produced by KeybindInput (e.target.key strings).
         "space" | " " => Ok(0x20),
+        "escape" | "esc" => Ok(0x1B),
         "enter" => Ok(0x0D),
         "tab" => Ok(0x09),
         "backspace" => Ok(0x08),
@@ -205,6 +278,9 @@ pub fn bindings_from_config(config: &crate::config::AppConfig) -> Vec<(HotkeyAct
     }
     if !config.undo_bind.is_empty() {
         bindings.push((HotkeyAction::Undo, config.undo_bind.clone()));
+    }
+    if config.overlay_enabled && !config.overlay_bind.is_empty() {
+        bindings.push((HotkeyAction::OverlayToggle, config.overlay_bind.clone()));
     }
     bindings.into_iter().filter(|(_, s)| !s.is_empty()).collect()
 }
@@ -263,6 +339,18 @@ fn apply_bindings(
         };
 
         if result == 0 {
+            // Overlay temp digit/Esc keys are bare, globally-common keys that
+            // another running app can legitimately hold. A failure here must
+            // NOT reach the user-facing failure toast (it isn't a broken user
+            // bind) — log a warning and carry on so the toggle still works.
+            if matches!(action, HotkeyAction::OverlayKey(_)) {
+                log::warn!(
+                    "overlay keys: could not register {:?} (binding: '{}') — likely held by another app; skipping",
+                    action,
+                    binding_str
+                );
+                continue;
+            }
             log::warn!(
                 "Failed to register hotkey for action {:?} (binding: '{}')",
                 action,
@@ -301,6 +389,10 @@ pub fn spawn_hotkey_listener(
     let (failure_tx, failure_rx) = mpsc::channel::<Vec<HotkeyRegFailure>>(8);
     let pending: Arc<Mutex<Option<Vec<(HotkeyAction, String)>>>> = Arc::new(Mutex::new(None));
     let pending_clone = pending.clone();
+    let inner = Arc::new(Mutex::new(ControllerInner {
+        base: initial_bindings.clone(),
+        overlay_active: false,
+    }));
 
     // Use a sync channel so we can hand the listener thread's GetCurrentThreadId
     // back to the controller before this function returns.
@@ -365,7 +457,7 @@ pub fn spawn_hotkey_listener(
         .recv()
         .map_err(|e| format!("Hotkey listener didn't report its thread id: {}", e))?;
 
-    Ok((rx, failure_rx, HotkeyController { thread_id, pending }))
+    Ok((rx, failure_rx, HotkeyController { thread_id, inner, pending }))
 }
 
 #[cfg(test)]
@@ -416,5 +508,62 @@ mod tests {
         assert_eq!(key_name_to_vk("f12").unwrap(), 0x7B);
         assert_eq!(key_name_to_vk("f13").unwrap(), 0x7C);
         assert_eq!(key_name_to_vk("f24").unwrap(), 0x87);
+    }
+
+    #[test]
+    fn test_key_name_to_vk_digits() {
+        // "0".."9" map to VK 0x30..0x39.
+        assert_eq!(key_name_to_vk("0").unwrap(), 0x30);
+        assert_eq!(key_name_to_vk("1").unwrap(), 0x31);
+        assert_eq!(key_name_to_vk("9").unwrap(), 0x39);
+    }
+
+    #[test]
+    fn test_key_name_to_vk_escape() {
+        assert_eq!(key_name_to_vk("escape").unwrap(), 0x1B);
+        assert_eq!(key_name_to_vk("esc").unwrap(), 0x1B);
+        assert_eq!(key_name_to_vk("ESCAPE").unwrap(), 0x1B);
+    }
+
+    #[test]
+    fn test_parse_hotkey_bare_key() {
+        // Overlay temp keys are modifier-less; parse must accept them.
+        let d = parse_hotkey("1").unwrap();
+        assert!(!d.ctrl && !d.alt && !d.shift);
+        assert_eq!(d.vk_code, 0x31);
+
+        let esc = parse_hotkey("escape").unwrap();
+        assert_eq!(esc.vk_code, 0x1B);
+    }
+
+    #[test]
+    fn test_overlay_temp_bindings_shape() {
+        let b = overlay_temp_bindings();
+        // 1-9, 0, escape = 11 entries.
+        assert_eq!(b.len(), 11);
+        assert_eq!(b[0], (HotkeyAction::OverlayKey(1), "1".to_string()));
+        assert_eq!(b[8], (HotkeyAction::OverlayKey(9), "9".to_string()));
+        assert_eq!(b[9], (HotkeyAction::OverlayKey(0), "0".to_string()));
+        assert_eq!(b[10], (HotkeyAction::OverlayKey(10), "escape".to_string()));
+        // Every temp binding must parse (else it can never register).
+        for (_, s) in &b {
+            assert!(parse_hotkey(s).is_ok(), "temp bind '{}' must parse", s);
+        }
+    }
+
+    #[test]
+    fn test_bindings_from_config_includes_overlay_toggle() {
+        let mut cfg = crate::config::AppConfig::default();
+        cfg.overlay_enabled = true;
+        cfg.overlay_bind = "shift+F1".to_string();
+        let binds = bindings_from_config(&cfg);
+        assert!(binds
+            .iter()
+            .any(|(a, s)| *a == HotkeyAction::OverlayToggle && s == "shift+F1"));
+
+        // Disabled → no toggle bind.
+        cfg.overlay_enabled = false;
+        let binds = bindings_from_config(&cfg);
+        assert!(!binds.iter().any(|(a, _)| *a == HotkeyAction::OverlayToggle));
     }
 }
