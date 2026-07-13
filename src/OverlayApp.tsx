@@ -121,6 +121,14 @@ export function OverlayApp() {
   const menuRef = useRef<Menu>(menu);
   const bufferRef = useRef("");
   const ctxRef = useRef<OverlayContext | null>(ctx);
+  // Mirrors `flash` for the hotkey listener: while a success/error flash is
+  // pending, digit input must be ignored — the flash swaps the JSX so mouse
+  // can't re-fire, but global hotkeys bypass the DOM entirely (double-tapping
+  // a digit would double-sort and keep extending the close timer).
+  const flashRef = useRef<Flash>(null);
+  useEffect(() => {
+    flashRef.current = flash;
+  }, [flash]);
   useEffect(() => {
     menuRef.current = menu;
   }, [menu]);
@@ -130,6 +138,9 @@ export function OverlayApp() {
 
   const flashTimer = useRef<number | null>(null);
   const showFlash = useCallback((kind: "success" | "error" | "warn", text: string) => {
+    // Sync the ref immediately — the next overlay-key event can arrive before
+    // React flushes the state effect, and it must already see the flash.
+    flashRef.current = { kind, text };
     setFlash({ kind, text });
   }, []);
 
@@ -155,6 +166,7 @@ export function OverlayApp() {
     setMenu("root");
     setTypingBuffer("");
     bufferRef.current = "";
+    flashRef.current = null;
     setFlash(null);
     if (flashTimer.current) {
       window.clearTimeout(flashTimer.current);
@@ -290,6 +302,7 @@ export function OverlayApp() {
       const m = menuRef.current;
       const c = ctxRef.current;
       if (typeof m === "object") return; // typing mode ignores digits
+      if (flashRef.current) return; // action pending/flashing — no re-fire
 
       if (m === "root") {
         if (n === 1) setMenu("sort");
@@ -386,7 +399,9 @@ export function OverlayApp() {
 
         {!ctx && loadError && (
           <div className="p-6 text-center space-y-1">
-            <p className="text-[15px] font-semibold text-white/80">No recent clip</p>
+            <p className="text-[15px] font-semibold text-white/80">
+              {loadError || "No recent clip"}
+            </p>
             <p className="text-[11px] text-white/40">
               Save a clip first, then reopen the overlay.
             </p>
