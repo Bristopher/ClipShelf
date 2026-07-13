@@ -190,4 +190,7 @@ export interface HistoryEntry {
   /** Logical day bucket ("YYYY-MM-DD"), precomputed by the backend. */
   day: string;
   filename: string;
+  /** Distinct-clip identity from backend reconciliation. All events of one
+   * physical clip share it, so group headers count DISTINCT clips, not rows. */
+  clipId: number;
 }

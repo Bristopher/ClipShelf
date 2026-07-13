@@ -65,7 +65,16 @@ interface HistoryMenuState extends ContextMenuState {
   entry: HistoryEntry;
 }
 
-/** Group entries by `game ?? "No game detected"`, groups sorted by count desc. */
+/** Distinct physical clips in a set of rows (events of one clip share clipId). */
+function distinctClips(rows: HistoryEntry[]): number {
+  return new Set(rows.map((e) => e.clipId)).size;
+}
+
+/**
+ * Group entries by `game ?? "No game detected"`, groups sorted by DISTINCT
+ * clip count desc. Because the backend reconciles game per clip identity, an
+ * edited clip's whole history lands in one group — never split across games.
+ */
 function groupByGame(entries: HistoryEntry[]): [string, HistoryEntry[]][] {
   const map = new Map<string, HistoryEntry[]>();
   for (const e of entries) {
@@ -74,7 +83,7 @@ function groupByGame(entries: HistoryEntry[]): [string, HistoryEntry[]][] {
     if (bucket) bucket.push(e);
     else map.set(key, [e]);
   }
-  return [...map.entries()].sort((a, b) => b[1].length - a[1].length);
+  return [...map.entries()].sort((a, b) => distinctClips(b[1]) - distinctClips(a[1]));
 }
 
 function groupByDay(entries: HistoryEntry[]): [string, HistoryEntry[]][] {
@@ -116,6 +125,14 @@ export function HistoryPanelButton({ onRestore, dayRolloverHour }: HistoryPanelB
       .catch((e) => toastError(errorMessage(e)));
   };
 
+  // Close the panel and reset any in-flight edit/context-menu so reopening
+  // starts clean — used by every close path (Esc, outside click, toggle).
+  const closePanel = () => {
+    setOpen(false);
+    setEditingKey(null);
+    setMenu(null);
+  };
+
   useEffect(() => {
     if (!open) return;
     load(view === "all");
@@ -128,13 +145,13 @@ export function HistoryPanelButton({ onRestore, dayRolloverHour }: HistoryPanelB
       // MENU (via its own [menu] effect), not the panel.
       if (menuRef.current) return;
       if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
-        setOpen(false);
+        closePanel();
       }
     };
     const onKey = (e: KeyboardEvent) => {
       // Esc closes the context menu first (its own [menu] effect handles
       // that); only close the panel when no menu is open.
-      if (e.key === "Escape" && !menuRef.current) setOpen(false);
+      if (e.key === "Escape" && !menuRef.current) closePanel();
     };
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
@@ -270,14 +287,17 @@ export function HistoryPanelButton({ onRestore, dayRolloverHour }: HistoryPanelB
   };
 
   const renderGameGroups = (list: HistoryEntry[]) =>
-    groupByGame(list).map(([game, rows]) => (
+    groupByGame(list).map(([game, rows]) => {
+      const clips = distinctClips(rows);
+      return (
       <div key={game} className="mb-2">
         <p className="text-[10px] font-semibold text-t-muted px-1.5 py-0.5">
-          {game} — {rows.length} clip{rows.length === 1 ? "" : "s"}
+          {game} — {clips} clip{clips === 1 ? "" : "s"}
         </p>
         <div className="space-y-0.5">{rows.map(renderRow)}</div>
       </div>
-    ));
+      );
+    });
 
   return (
     <div ref={wrapRef} className="relative">
@@ -287,7 +307,7 @@ export function HistoryPanelButton({ onRestore, dayRolloverHour }: HistoryPanelB
         className="h-7 text-xs gap-1"
         title="History"
         aria-label="History"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => (open ? closePanel() : setOpen(true))}
       >
         <History className="h-3 w-3" />
         History
@@ -324,14 +344,17 @@ export function HistoryPanelButton({ onRestore, dayRolloverHour }: HistoryPanelB
             ) : view === "today" ? (
               renderGameGroups(entries)
             ) : (
-              groupByDay(entries).map(([day, rows]) => (
+              groupByDay(entries).map(([day, rows]) => {
+                const clips = distinctClips(rows);
+                return (
                 <div key={day} className="mb-3">
                   <p className="text-[10px] font-semibold text-t-text px-1.5 py-0.5 border-b border-t-border">
-                    {fmtDay(day)} — {rows.length} clip{rows.length === 1 ? "" : "s"}
+                    {fmtDay(day)} — {clips} clip{clips === 1 ? "" : "s"}
                   </p>
                   {renderGameGroups(rows)}
                 </div>
-              ))
+                );
+              })
             )}
           </div>
 

@@ -149,4 +149,9 @@ pub struct HistoryEntryPayload {
     /// rollover hour — the frontend groups by this, never re-derives it.
     pub day: String,
     pub filename: String,
+    /// Distinct-clip identity assigned by `history_payloads` reconciliation.
+    /// All events of one physical clip (across move/rename/undo) share it, so
+    /// the frontend counts DISTINCT clips per group instead of counting rows.
+    #[serde(rename = "clipId")]
+    pub clip_id: usize,
 }

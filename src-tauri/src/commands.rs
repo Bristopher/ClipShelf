@@ -13,6 +13,15 @@ use crate::watcher::WatcherCommand;
 /// Map + filter history events for the UI: newest first, optionally only
 /// the current logical day. Pure so it's unit-testable without disk or state.
 ///
+/// Before mapping, events are RECONCILED by clip identity. The raw log counts
+/// each event separately and never relabels a clip whose game was corrected —
+/// so a moved/renamed clip looked like several clips, and a `game_edited`
+/// event only changed one row. Here we walk the log chronologically (input is
+/// oldest-first) tracking each physical clip across `moved`/`renamed`/`undone`
+/// path transfers, apply the latest `game_edited` to the whole chain, and tag
+/// every event with its clip's identity index (`clip_id`). The frontend counts
+/// DISTINCT `clip_id`s per group and shows each clip's EFFECTIVE game.
+///
 /// The `day` bucket is the event's `ts` shifted by the rollover hour (a 3 AM
 /// clip counts as the previous day for a 4 AM rollover). An unparseable `ts`
 /// is never dropped — it falls back to the leading `YYYY-MM-DD` slice so the
@@ -23,17 +32,110 @@ pub(crate) fn history_payloads(
     full: bool,
     today: &str,
 ) -> Vec<HistoryEntryPayload> {
+    use std::collections::HashMap;
+
+    /// One physical clip's game state across its whole event chain.
+    struct Identity {
+        /// Game detected when the clip first appeared (or the first event
+        /// that formed a singleton identity).
+        original_game: Option<String>,
+        /// Latest `game_edited` correction, if any — it wins for display.
+        edited_game: Option<String>,
+    }
+
+    let mut identities: Vec<Identity> = Vec::new();
+    // Maps a clip's CURRENT path to its identity index. Rewired on transfer.
+    let mut path_to_id: HashMap<&str, usize> = HashMap::new();
+    // One identity index per event, aligned with `events` (oldest-first).
+    let mut tags: Vec<usize> = Vec::with_capacity(events.len());
+
+    // Chronological walk (oldest-first — the newest-first reversal is below).
+    for e in &events {
+        let idx = match e.event.as_str() {
+            // A new clip appears: fresh identity carrying its detected game.
+            "created" => {
+                identities.push(Identity {
+                    original_game: e.game.clone(),
+                    edited_game: None,
+                });
+                let idx = identities.len() - 1;
+                path_to_id.insert(&e.path, idx);
+                idx
+            }
+            // Path transfer old_path -> path (undone restores restored-to from
+            // undone-from — same direction). Preserve the clip's identity.
+            "moved" | "renamed" | "undone" => {
+                match e.old_path.as_deref().and_then(|p| path_to_id.remove(p)) {
+                    Some(idx) => {
+                        path_to_id.insert(&e.path, idx);
+                        idx
+                    }
+                    // Old path unknown (e.g. clip predates the history feature)
+                    // — singleton identity keyed at the new path.
+                    None => {
+                        identities.push(Identity {
+                            original_game: e.game.clone(),
+                            edited_game: None,
+                        });
+                        let idx = identities.len() - 1;
+                        path_to_id.insert(&e.path, idx);
+                        idx
+                    }
+                }
+            }
+            // Game correction: latest edit wins for the whole chain. Unknown
+            // path forms its own singleton so it still shows the edited game.
+            "game_edited" => match path_to_id.get(e.path.as_str()) {
+                Some(&idx) => {
+                    identities[idx].edited_game = e.game.clone();
+                    idx
+                }
+                None => {
+                    identities.push(Identity {
+                        original_game: None,
+                        edited_game: e.game.clone(),
+                    });
+                    let idx = identities.len() - 1;
+                    path_to_id.insert(&e.path, idx);
+                    idx
+                }
+            },
+            // rated/labeled/described and anything else: attach to the clip at
+            // this path, or a singleton if the path is unknown.
+            _ => match path_to_id.get(e.path.as_str()) {
+                Some(&idx) => idx,
+                None => {
+                    identities.push(Identity {
+                        original_game: e.game.clone(),
+                        edited_game: None,
+                    });
+                    let idx = identities.len() - 1;
+                    path_to_id.insert(&e.path, idx);
+                    idx
+                }
+            },
+        };
+        tags.push(idx);
+    }
+
+    // Effective game per identity: latest game_edited, else original detected.
+    let effective: Vec<Option<String>> = identities
+        .iter()
+        .map(|id| id.edited_game.clone().or_else(|| id.original_game.clone()))
+        .collect();
+
     events
         .into_iter()
+        .zip(tags)
         .rev() // newest first (file is oldest-first)
-        .filter_map(|e| {
+        .filter_map(|(e, clip_id)| {
             // Bucket by the timestamp's OWN recorded offset (history `ts` is
             // written in local time) so the day stays stable regardless of the
             // viewer's current machine timezone. Unparseable → keep the row
             // with the leading date slice rather than dropping it silently.
             let day = match chrono::DateTime::parse_from_rfc3339(&e.ts) {
                 Ok(dt) => crate::stats::logical_date_of(dt, rollover_hour),
-                Err(_) => e.ts[..10.min(e.ts.len())].to_string(),
+                Err(_) => e.ts.get(..10).unwrap_or(&e.ts).to_string(),
             };
             if !full && day != today {
                 return None;
@@ -48,7 +150,8 @@ pub(crate) fn history_payloads(
                 event: e.event,
                 path: e.path,
                 old_path: e.old_path,
-                game: e.game,
+                // Reconciled: every event of a clip shows its effective game.
+                game: effective.get(clip_id).cloned().flatten(),
                 exe: e.exe,
                 key: e.key,
                 rating: e.rating,
@@ -57,6 +160,7 @@ pub(crate) fn history_payloads(
                 source: e.source,
                 day,
                 filename,
+                clip_id,
             })
         })
         .collect()
@@ -107,8 +211,9 @@ pub async fn edit_history_game(
         .to_string();
 
     // One short critical section: re-key the session game, build the log
-    // entry, and (if remembering) apply the override + snapshot config.
-    let save = {
+    // entry, snapshot the config path (needed for the history file even when
+    // not remembering), and (if remembering) apply the override + config.
+    let (save, config_path) = {
         let mut s = state.lock().map_err(|e| e.to_string())?;
         if s.clip_games.contains_key(&clip_path) {
             s.clip_games.insert(clip_path.clone(), game.clone());
@@ -126,17 +231,13 @@ pub async fn edit_history_game(
             Some(path.clone()),
         );
         let _ = app.emit("log-entry", &entry);
-        if remembered {
-            Some((s.config.clone(), s.config_path.clone()))
+        let config_path = s.config_path.clone();
+        let save = if remembered {
+            Some((s.config.clone(), config_path.clone()))
         } else {
             None
-        }
-    };
-
-    // Config path is needed for the history file even when not remembering.
-    let config_path = {
-        let s = state.lock().map_err(|e| e.to_string())?;
-        s.config_path.clone()
+        };
+        (save, config_path)
     };
 
     // Disk work off the lock: append the history event, and persist config +
@@ -529,10 +630,14 @@ pub fn select_dropped_file(
 #[tauri::command]
 pub fn get_gkey_stats(state: State<'_, AppState>) -> Result<Vec<GKeyStatPayload>, String> {
     let s = state.lock().map_err(|e| e.to_string())?;
+    // Report zeros when the persisted counts belong to a previous logical day
+    // — otherwise the badge shows yesterday's totals until the next increment
+    // resets them. Read-only: don't mutate state here (increment resets it).
+    let stale = s.daily_stats.date != crate::stats::logical_today(s.config.day_rollover_hour);
     Ok((1u8..=3)
         .map(|key| GKeyStatPayload {
             key,
-            count: s.daily_stats.count(key),
+            count: if stale { 0 } else { s.daily_stats.count(key) },
             recent: s
                 .gkey_recent
                 .get(&key)
@@ -1290,5 +1395,90 @@ mod tests {
         let out = history_payloads(events, 4, true, "2099-01-01");
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].day, "bad");
+    }
+
+    // Build a typed event at a given ts/path with an explicit event kind.
+    fn ev_kind(ts: &str, kind: &str, path: &str) -> HistoryEvent {
+        let mut e = HistoryEvent::new(kind, Path::new(path), "app");
+        e.ts = ts.to_string();
+        e
+    }
+
+    #[test]
+    fn test_reconcile_created_then_moved_shares_clip_id() {
+        // created(A) + moved(A->B) for one clip → both events same clip_id.
+        let events = vec![
+            ev_kind("2026-07-12T10:00:00-06:00", "created", "C:/clips/a.mp4")
+                .with_game("Halo"),
+            {
+                let mut m = ev_kind("2026-07-12T10:01:00-06:00", "moved", "C:/clips/sorted/a.mp4");
+                m.old_path = Some("C:/clips/a.mp4".to_string());
+                m
+            },
+        ];
+        let out = history_payloads(events, 4, true, "2026-07-12");
+        assert_eq!(out.len(), 2);
+        // Both events belong to the same clip identity.
+        assert_eq!(out[0].clip_id, out[1].clip_id);
+        // Group logic (distinct clip_ids) would see exactly one clip.
+        let distinct: std::collections::HashSet<usize> =
+            out.iter().map(|e| e.clip_id).collect();
+        assert_eq!(distinct.len(), 1);
+        // Both still carry the detected game.
+        assert_eq!(out[0].game.as_deref(), Some("Halo"));
+        assert_eq!(out[1].game.as_deref(), Some("Halo"));
+    }
+
+    #[test]
+    fn test_reconcile_game_edited_relabels_whole_chain() {
+        // created(A) + moved(A->B) + game_edited(B,"Valorant") → ALL THREE
+        // events show "Valorant" and share one clip_id.
+        let events = vec![
+            ev_kind("2026-07-12T10:00:00-06:00", "created", "C:/clips/a.mp4")
+                .with_game("Halo"),
+            {
+                let mut m = ev_kind("2026-07-12T10:01:00-06:00", "moved", "C:/clips/b.mp4");
+                m.old_path = Some("C:/clips/a.mp4".to_string());
+                m
+            },
+            ev_kind("2026-07-12T10:02:00-06:00", "game_edited", "C:/clips/b.mp4")
+                .with_game("Valorant"),
+        ];
+        let out = history_payloads(events, 4, true, "2026-07-12");
+        assert_eq!(out.len(), 3);
+        for row in &out {
+            assert_eq!(row.game.as_deref(), Some("Valorant"), "event {} relabeled", row.event);
+        }
+        let distinct: std::collections::HashSet<usize> =
+            out.iter().map(|e| e.clip_id).collect();
+        assert_eq!(distinct.len(), 1);
+    }
+
+    #[test]
+    fn test_reconcile_two_clips_have_distinct_ids() {
+        let events = vec![
+            ev_kind("2026-07-12T10:00:00-06:00", "created", "C:/clips/a.mp4")
+                .with_game("Halo"),
+            ev_kind("2026-07-12T10:01:00-06:00", "created", "C:/clips/b.mp4")
+                .with_game("Doom"),
+        ];
+        let out = history_payloads(events, 4, true, "2026-07-12");
+        assert_eq!(out.len(), 2);
+        let distinct: std::collections::HashSet<usize> =
+            out.iter().map(|e| e.clip_id).collect();
+        assert_eq!(distinct.len(), 2);
+    }
+
+    #[test]
+    fn test_reconcile_game_edited_on_unknown_path_is_singleton() {
+        // game_edited on a path never seen as created/moved → its own
+        // singleton identity, doesn't panic, shows the edited game.
+        let events = vec![
+            ev_kind("2026-07-12T10:00:00-06:00", "game_edited", "C:/clips/ghost.mp4")
+                .with_game("Portal"),
+        ];
+        let out = history_payloads(events, 4, true, "2026-07-12");
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].game.as_deref(), Some("Portal"));
     }
 }

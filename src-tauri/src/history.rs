@@ -92,8 +92,6 @@ pub fn append(path: &Path, event: &HistoryEvent) {
 
 /// Read every event, oldest first. Corrupt/blank lines are skipped —
 /// never fatal (the file may predate schema changes).
-// consumed in Phase 2/3 (History panel reads the log back)
-#[allow(dead_code)]
 pub fn read_all(path: &Path) -> Vec<HistoryEvent> {
     let Ok(file) = std::fs::File::open(path) else {
         return Vec::new();
