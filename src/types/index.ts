@@ -100,6 +100,11 @@ export interface AppConfig {
   write_file_properties: boolean;
   day_rollover_hour: number;
   game_overrides: { exe: string; name: string }[];
+  overlay_enabled: boolean;
+  overlay_bind: string;
+  overlay_typing_enabled: boolean;
+  label_presets: string[];
+  description_presets: string[];
 }
 
 export interface RecentClip {

@@ -47,6 +47,11 @@ fn default_game_detection_enabled() -> bool { true }
 fn default_write_file_properties() -> bool { true }
 fn default_day_rollover_hour() -> u8 { 4 }
 fn default_game_overrides() -> Vec<GameOverride> { Vec::new() }
+fn default_overlay_enabled() -> bool { true }
+fn default_overlay_bind() -> String { "shift+F1".to_string() }
+fn default_overlay_typing_enabled() -> bool { true }
+fn default_label_presets() -> Vec<String> { vec!["clutch".to_string(), "ace".to_string(), "funny".to_string(), "fail".to_string()] }
+fn default_description_presets() -> Vec<String> { Vec::new() }
 
 /// Max entries kept in the rename most-recently-used list.
 pub const RENAME_MRU_MAX: usize = 8;
@@ -230,6 +235,28 @@ pub struct AppConfig {
     /// User corrections for misdetected games, checked before heuristics.
     #[serde(default = "default_game_overrides")]
     pub game_overrides: Vec<GameOverride>,
+
+    /// Master switch for the in-game overlay.
+    #[serde(default = "default_overlay_enabled")]
+    pub overlay_enabled: bool,
+
+    /// Global hotkey that toggles the overlay. Note: game sees the Shift keydown
+    /// (modifier leak).
+    #[serde(default = "default_overlay_bind")]
+    pub overlay_bind: String,
+
+    /// Allow the LL-hook type mode (captures the keyboard while a text field
+    /// is open).
+    #[serde(default = "default_overlay_typing_enabled")]
+    pub overlay_typing_enabled: bool,
+
+    /// One-keypress label chips in the overlay.
+    #[serde(default = "default_label_presets")]
+    pub label_presets: Vec<String>,
+
+    /// One-keypress description chips in the overlay.
+    #[serde(default = "default_description_presets")]
+    pub description_presets: Vec<String>,
 }
 
 impl Default for AppConfig {
@@ -277,6 +304,11 @@ impl Default for AppConfig {
             write_file_properties: default_write_file_properties(),
             day_rollover_hour: default_day_rollover_hour(),
             game_overrides: default_game_overrides(),
+            overlay_enabled: default_overlay_enabled(),
+            overlay_bind: default_overlay_bind(),
+            overlay_typing_enabled: default_overlay_typing_enabled(),
+            label_presets: default_label_presets(),
+            description_presets: default_description_presets(),
         }
     }
 }
@@ -586,5 +618,37 @@ timer_duration_ms = 45000
         cfg.remember_game_override("cs2", "Counter-Strike 2");
         assert_eq!(cfg.game_overrides.len(), 1);
         assert_eq!(cfg.game_overrides[0].name, "Counter-Strike 2");
+    }
+
+    #[test]
+    fn test_overlay_config_defaults() {
+        let cfg = AppConfig::default();
+        assert!(cfg.overlay_enabled);
+        assert_eq!(cfg.overlay_bind, "shift+F1");
+        assert!(cfg.overlay_typing_enabled);
+        assert_eq!(cfg.label_presets, vec!["clutch", "ace", "funny", "fail"]);
+        assert!(cfg.description_presets.is_empty());
+    }
+
+    #[test]
+    fn test_overlay_presets_toml_roundtrip() {
+        let tmp = NamedTempFile::new().expect("failed to create temp file");
+        let path = tmp.path();
+
+        let mut original = AppConfig::default();
+        original.overlay_enabled = false;
+        original.overlay_bind = "ctrl+shift+O".to_string();
+        original.overlay_typing_enabled = false;
+        original.label_presets = vec!["custom1".to_string(), "custom2".to_string()];
+        original.description_presets = vec!["desc1".to_string(), "desc2".to_string(), "desc3".to_string()];
+
+        original.save_to(path).expect("save_to failed");
+
+        let loaded = AppConfig::load_from(path).expect("load_from failed");
+        assert!(!loaded.overlay_enabled);
+        assert_eq!(loaded.overlay_bind, "ctrl+shift+O");
+        assert!(!loaded.overlay_typing_enabled);
+        assert_eq!(loaded.label_presets, vec!["custom1", "custom2"]);
+        assert_eq!(loaded.description_presets, vec!["desc1", "desc2", "desc3"]);
     }
 }
