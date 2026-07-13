@@ -4,6 +4,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import App from "./App";
 import { SettingsApp } from "./SettingsApp";
 import { FirstRunApp } from "./FirstRunApp";
+import { OverlayApp } from "./OverlayApp";
 import { toastError } from "./lib/toast";
 import "./index.css";
 
@@ -62,7 +63,13 @@ try {
 }
 
 const Root =
-  label === "settings" ? SettingsApp : label === "first-run" ? FirstRunApp : App;
+  label === "settings"
+    ? SettingsApp
+    : label === "first-run"
+      ? FirstRunApp
+      : label === "overlay"
+        ? OverlayApp
+        : App;
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>

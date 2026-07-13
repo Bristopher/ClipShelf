@@ -7,6 +7,7 @@ mod hotkeys;
 mod logger;
 mod mover;
 mod obs_ws;
+mod overlay;
 mod props;
 mod sound;
 mod state;
@@ -582,6 +583,11 @@ pub fn run() {
             .background_color(Color(10, 10, 10, 255))
             .build();
 
+            // Overlay window: non-activating always-on-top panel shown over
+            // the game via show_overlay/hide_overlay. Pre-created here like
+            // settings/first-run above, for the same reason.
+            overlay::init(&app_handle);
+
             // Window starts hidden (see tauri.conf.json). Reveal now that
             // position and opacity have been applied — avoids the flash of
             // window appearing on the primary monitor before jumping.
@@ -637,6 +643,8 @@ pub fn run() {
             commands::test_obs_connection,
             commands::get_history,
             commands::edit_history_game,
+            overlay::show_overlay,
+            overlay::hide_overlay,
         ])
         .on_window_event(|window, event| {
             match event {
