@@ -64,8 +64,12 @@ pub(crate) fn history_payloads(
             }
             // Path transfer old_path -> path (undone restores restored-to from
             // undone-from — same direction). Preserve the clip's identity.
+            // `get`, not `remove`: old paths stay mapped so a game_edited
+            // written against a PRE-move path (user right-clicked the created
+            // row of a sorted clip) still finds the chain. A later `created`
+            // at the old path overwrites the mapping, so reuse stays correct.
             "moved" | "renamed" | "undone" => {
-                match e.old_path.as_deref().and_then(|p| path_to_id.remove(p)) {
+                match e.old_path.as_deref().and_then(|p| path_to_id.get(p).copied()) {
                     Some(idx) => {
                         path_to_id.insert(&e.path, idx);
                         idx
@@ -1452,6 +1456,33 @@ mod tests {
         let distinct: std::collections::HashSet<usize> =
             out.iter().map(|e| e.clip_id).collect();
         assert_eq!(distinct.len(), 1);
+    }
+
+    #[test]
+    fn test_reconcile_game_edited_at_pre_move_path_relabels_whole_chain() {
+        // Regression: user right-clicks the CREATED row of an already-sorted
+        // clip — the edit is recorded against the pre-move path A. Old paths
+        // must stay mapped (transfer uses get, not remove) so the whole
+        // chain still relabels as one clip.
+        let events = vec![
+            ev_kind("2026-07-12T10:00:00-06:00", "created", "C:/clips/a.mp4")
+                .with_game("Halo"),
+            {
+                let mut m = ev_kind("2026-07-12T10:01:00-06:00", "moved", "C:/clips/b.mp4");
+                m.old_path = Some("C:/clips/a.mp4".to_string());
+                m
+            },
+            ev_kind("2026-07-12T10:02:00-06:00", "game_edited", "C:/clips/a.mp4")
+                .with_game("Valorant"),
+        ];
+        let out = history_payloads(events, 4, true, "2026-07-12");
+        assert_eq!(out.len(), 3);
+        for row in &out {
+            assert_eq!(row.game.as_deref(), Some("Valorant"), "event {} relabeled", row.event);
+        }
+        let distinct: std::collections::HashSet<usize> =
+            out.iter().map(|e| e.clip_id).collect();
+        assert_eq!(distinct.len(), 1, "one clip, never split across groups");
     }
 
     #[test]

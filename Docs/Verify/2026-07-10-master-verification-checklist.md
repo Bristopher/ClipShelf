@@ -225,8 +225,13 @@ browse old history. Human items:
       near-future hour) lands in the PREVIOUS day's bucket; G-key badge
       counts agree with the panel
 - [ ] All view groups by day; entries match `history.jsonl`
-- [ ] Edit game → Save relabels; Save & Remember adds the override in
-      Settings and the next clip from that exe uses it
+- [ ] Edit game from the CREATED row of an already-sorted clip → the whole
+      chain (created + moved rows) relabels into ONE group under the new
+      game, never split across two groups; Save & Remember adds the
+      override in Settings and the next clip from that exe uses it
+- [ ] With `gkey_stats.toml` carrying a stale date (or the app left running
+      across the rollover hour), G-key badges read 0 and agree with an
+      empty Today panel — before any new move
 - [ ] Remember disabled (tooltip) on entries without exe
 - [ ] Restore log display still works from the panel footer
 - [ ] Right-click menu actions work on rows (Reveal/Play/Copy)
