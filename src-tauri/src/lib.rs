@@ -661,6 +661,8 @@ pub fn run() {
             commands::cancel_calibration,
             commands::toggle_count_up,
             commands::full_quit,
+            commands::show_main_window,
+            commands::hide_tray_menu,
             commands::undo_last_action,
             commands::reveal_in_explorer,
             commands::set_watch_paused,

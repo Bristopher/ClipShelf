@@ -984,11 +984,6 @@ pub fn set_watch_paused(
         s.config.videos_folder.clone()
     };
 
-    // Keep the tray checkbox in sync when toggled from the UI.
-    if let Some(tray) = app.try_state::<crate::tray::TrayItems>() {
-        let _ = tray.pause_item.set_checked(paused);
-    }
-
     let watcher_tx = channels.watcher_tx.clone();
     let cmd = if paused {
         WatcherCommand::Stop
@@ -1133,6 +1128,22 @@ pub fn start_calibration(
     s.calibration.pending_save_at = None;
     s.calibration.samples.clear();
     Ok(())
+}
+
+#[tauri::command]
+pub fn show_main_window(app: AppHandle) {
+    // Tray menu "Open" action — reveal + focus the main window.
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+#[tauri::command]
+pub fn hide_tray_menu(app: AppHandle) {
+    if let Some(window) = app.get_webview_window(crate::tray::MENU_LABEL) {
+        let _ = window.hide();
+    }
 }
 
 #[tauri::command]

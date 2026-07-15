@@ -29,6 +29,8 @@ export const startCalibration = (targetSamples: number) =>
 export const cancelCalibration = () => invoke<void>("cancel_calibration");
 export const toggleCountUp = () => invoke<void>("toggle_count_up");
 export const fullQuit = () => invoke<void>("full_quit");
+export const showMainWindow = () => invoke<void>("show_main_window");
+export const hideTrayMenu = () => invoke<void>("hide_tray_menu");
 export const undoLastAction = () => invoke<void>("undo_last_action");
 export const revealInExplorer = (path: string) =>
   invoke<void>("reveal_in_explorer", { path });

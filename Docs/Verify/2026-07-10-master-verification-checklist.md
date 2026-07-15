@@ -1,6 +1,6 @@
 # Master Verification Checklist (2026-07-10)
 
-**Updated:** 2026-07-13 (adds §18; §16 history is now a full main-view toggle)
+**Updated:** 2026-07-15 (adds §19 themed tray menu; §18 icon item added 07-14)
 
 Everything code-verified but not yet exercised live, across three batches:
 the 2026-07-02 QoL batch (undo, pause, clickable log, autostart, window
@@ -352,3 +352,40 @@ was swapped; unused `gkey-logo-obs/-shadowplay.png` were deleted.
 - [ ] New icon appears in: taskbar, tray, Alt-Tab, title bars (main,
       Settings, first-run), and the installed Start-menu shortcut after the
       next `pnpm tauri build` (the exe icon is baked at build time)
+
+## 19. Themed tray context menu
+
+Shipped 2026-07-15. The tray icon's native context menu is replaced by a
+custom theme-matching popup: a frameless transparent always-on-top
+"traymenu" window (pre-created hidden, like settings/overlay) that Rust
+positions above-left of the cursor on tray right-click, clamped to the
+monitor. `TrayMenuApp.tsx` renders it with the active theme's tokens and
+refreshes pause-state/folder via `get_diagnostics` on every show. Items:
+Open GKey Mover, Pause/Resume Watching, Video Folder, Log Folder, Help,
+Exit. Dismisses on blur, Esc, or after any action. Left-click still opens
+the main window. The native menu, `TrayItems`, and the pause-checkbox sync
+in `set_watch_paused` are gone. Capabilities now include `traymenu` AND
+`overlay` (the overlay window was missing from `capabilities/default.json`
+entirely — its IPC may have been silently broken; §17's manual pass will
+confirm).
+
+**Automated coverage** — 105 cargo tests, zero warnings, `tsc` +
+`pnpm build` clean (no behavior tests possible for tray UI). Human items:
+
+- [ ] Right-click the tray icon: themed menu appears fully on-screen next
+      to the cursor (test on the primary monitor's taskbar corner and, if
+      available, a second monitor with different DPI scaling)
+- [ ] Menu matches the active theme, including after switching themes in
+      Settings while the app runs
+- [ ] Pause/Resume Watching from the menu updates the main window's
+      bottom-bar state (and vice versa — pausing in-app shows "Resume
+      Watching" on next menu open)
+- [ ] Video Folder / Log Folder open Explorer; both disabled (greyed) when
+      no clips folder is configured
+- [ ] Exit fully quits the process (check the tray icon disappears)
+- [ ] Menu dismisses on: clicking elsewhere (blur), Esc, and after every
+      action; reopening works repeatedly without drift or blank content
+- [ ] Left-click on the tray icon still shows/focuses the main window
+- [ ] Overlay IPC still works after the capabilities change (open overlay,
+      run one action) — the overlay window was previously absent from
+      capabilities

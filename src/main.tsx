@@ -5,6 +5,7 @@ import App from "./App";
 import { SettingsApp } from "./SettingsApp";
 import { FirstRunApp } from "./FirstRunApp";
 import { OverlayApp } from "./OverlayApp";
+import { TrayMenuApp } from "./TrayMenuApp";
 import { toastError } from "./lib/toast";
 import "./index.css";
 
@@ -69,7 +70,9 @@ const Root =
       ? FirstRunApp
       : label === "overlay"
         ? OverlayApp
-        : App;
+        : label === "traymenu"
+          ? TrayMenuApp
+          : App;
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
