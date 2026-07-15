@@ -342,3 +342,13 @@ runner in this repo). Human items:
       first-paints in the last active theme (no white/dark flash at boot)
 - [ ] Overlay window is still fully transparent around the menu card (no
       opaque rectangle behind it)
+
+Also shipped 2026-07-14: new "Keycap" app icon (dark keycap, glowing blue G)
+replacing the flat cyan logo. Source of truth is
+`src-tauri/icons/keycap-source.svg`; the icon set was regenerated with
+`pnpm tauri icon` and `src/assets/gkey-logo.png` (title bars + first-run)
+was swapped; unused `gkey-logo-obs/-shadowplay.png` were deleted.
+
+- [ ] New icon appears in: taskbar, tray, Alt-Tab, title bars (main,
+      Settings, first-run), and the installed Start-menu shortcut after the
+      next `pnpm tauri build` (the exe icon is baked at build time)
