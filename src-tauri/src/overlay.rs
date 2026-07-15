@@ -34,6 +34,11 @@ pub fn init(app: &AppHandle) {
         .always_on_top(true)
         .skip_taskbar(true)
         .focused(false)
+        // Never focusable at the windowing level — WS_EX_NOACTIVATE alone
+        // doesn't stop WebView2 from grabbing focus when it becomes visible
+        // (which activates the window and minimizes exclusive-fullscreen
+        // games). With focusable(false), tao refuses activation entirely.
+        .focusable(false)
         .visible(false)
         .build()
     {
@@ -88,9 +93,58 @@ pub fn show(app: &AppHandle) {
     }
 
     // Deliberately no `set_focus()` — that's the whole point of this window.
+    // Remember who owns the foreground BEFORE the show, so the guard below
+    // can hand it back if showing the webview activates us anyway.
+    let prev_foreground = current_foreground();
     let _ = window.show();
+    guard_foreground(prev_foreground);
 
     let _ = app.emit("overlay-visible", serde_json::json!({ "visible": true }));
+}
+
+/// The current foreground window as a raw handle value (0 if none).
+fn current_foreground() -> isize {
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+    unsafe { GetForegroundWindow() as isize }
+}
+
+/// Watchdog for the "overlay show minimized my fullscreen game" failure:
+/// WS_EX_NOACTIVATE + focusable(false) should prevent activation, but
+/// WebView2 has been observed grabbing focus when its window becomes
+/// visible, which yanks the foreground off the game (exclusive-fullscreen
+/// games minimize on that). For a short window after show, if the foreground
+/// moves to any window of OUR process while the game held it before, hand it
+/// straight back. Restores only when the thief is us — a genuine user
+/// alt-tab to another app is left alone.
+fn guard_foreground(prev: isize) {
+    if prev == 0 {
+        return;
+    }
+    std::thread::spawn(move || {
+        use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            GetForegroundWindow, GetWindowThreadProcessId, IsWindow, SetForegroundWindow,
+        };
+        let own_pid = unsafe { GetCurrentProcessId() };
+        // ~300ms of vigilance: WebView2's focus grab lands within the first
+        // few frames after the window becomes visible.
+        for _ in 0..10 {
+            std::thread::sleep(std::time::Duration::from_millis(30));
+            unsafe {
+                let fg = GetForegroundWindow();
+                if fg as isize == prev {
+                    continue;
+                }
+                let mut pid = 0u32;
+                GetWindowThreadProcessId(fg, &mut pid);
+                if pid == own_pid && IsWindow(prev as _) != 0 {
+                    // We stole it — give it back. Allowed because our
+                    // process currently owns the foreground.
+                    SetForegroundWindow(prev as _);
+                }
+            }
+        }
+    });
 }
 
 /// Hide the overlay. Emits `overlay-visible` `{visible: false}` app-wide.

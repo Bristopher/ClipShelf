@@ -389,3 +389,17 @@ confirm).
 - [ ] Overlay IPC still works after the capabilities change (open overlay,
       run one action) — the overlay window was previously absent from
       capabilities
+
+Also shipped 2026-07-15: fix for the overlay intermittently minimizing
+fullscreen games on open. Two layers: the overlay window is now
+`focusable(false)` at the windowing level (WS_EX_NOACTIVATE alone didn't
+stop WebView2 from grabbing focus when becoming visible), and `show()` runs
+a ~300ms foreground watchdog that hands focus straight back to the game if
+any window of our process steals it after the show. The watchdog only
+reacts when the thief is our own process.
+
+- [ ] Open the overlay ~10 times over an exclusive-fullscreen game and ~10
+      over borderless: the game must never minimize or lose input
+- [ ] Clicking overlay buttons with the mouse also must not minimize the
+      game (click-time focus grabs are outside the show-time watchdog —
+      report if this still reproduces)
