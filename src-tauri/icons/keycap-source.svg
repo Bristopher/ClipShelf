@@ -1,13 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="1024" height="1024">
   <!-- Gkey Mover app icon — "The Keycap". Source of truth for all generated
        icons: rasterize at 1024px, then `pnpm tauri icon` regenerates the set.
+       The keycap fills the canvas edge-to-edge (no background tile) so the
+       icon has the same visual mass as neighboring taskbar icons.
        Legend uses Segoe UI (weight 800): rasterize on Windows so the G renders
        with the real font. -->
   <defs>
-    <linearGradient id="bgSquircle" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#1a2029"/>
-      <stop offset="1" stop-color="#0c0f15"/>
-    </linearGradient>
     <linearGradient id="capTop" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#333c4e"/>
       <stop offset="1" stop-color="#1c222e"/>
@@ -17,23 +15,21 @@
       <stop offset="1" stop-color="#2563eb"/>
     </linearGradient>
     <filter id="legendGlow" x="-40%" y="-40%" width="180%" height="180%">
-      <feGaussianBlur stdDeviation="4"/>
+      <feGaussianBlur stdDeviation="5"/>
     </filter>
   </defs>
-  <rect x="4" y="4" width="120" height="120" rx="28" fill="url(#bgSquircle)"/>
-  <rect x="4.5" y="4.5" width="119" height="119" rx="27.5" fill="none" stroke="#ffffff" stroke-opacity="0.06"/>
-  <!-- cap body (side walls) -->
-  <rect x="24" y="26" width="80" height="80" rx="16" fill="#0a0d12"/>
-  <rect x="24" y="24" width="80" height="78" rx="16" fill="#39434f"/>
+  <!-- cap body: bottom shadow wall, then the side walls -->
+  <rect x="4" y="12" width="120" height="114" rx="26" fill="#0a0d12"/>
+  <rect x="4" y="4" width="120" height="116" rx="26" fill="#39434f"/>
   <!-- cap top face -->
-  <rect x="30" y="28" width="68" height="64" rx="12" fill="url(#capTop)"/>
-  <rect x="30.5" y="28.5" width="67" height="63" rx="11.5" fill="none" stroke="#ffffff" stroke-opacity="0.10"/>
+  <rect x="14" y="12" width="100" height="92" rx="18" fill="url(#capTop)"/>
+  <rect x="14.75" y="12.75" width="98.5" height="90.5" rx="17.25" fill="none" stroke="#ffffff" stroke-opacity="0.10" stroke-width="1.5"/>
   <!-- legend glow (under the crisp legend) -->
-  <text x="64" y="63" text-anchor="middle" dominant-baseline="central"
-        font-family="Segoe UI, Arial, sans-serif" font-weight="800" font-size="44"
+  <text x="64" y="57" text-anchor="middle" dominant-baseline="central"
+        font-family="Segoe UI, Arial, sans-serif" font-weight="800" font-size="66"
         fill="#3b82f6" opacity="0.35" filter="url(#legendGlow)">G</text>
   <!-- legend -->
-  <text x="64" y="63" text-anchor="middle" dominant-baseline="central"
-        font-family="Segoe UI, Arial, sans-serif" font-weight="800" font-size="44"
+  <text x="64" y="57" text-anchor="middle" dominant-baseline="central"
+        font-family="Segoe UI, Arial, sans-serif" font-weight="800" font-size="66"
         fill="url(#blueLegend)">G</text>
 </svg>
