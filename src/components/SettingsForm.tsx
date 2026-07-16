@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Folder, Music, RotateCcw, X } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getVersion } from "@tauri-apps/api/app";
-import { getMonitorCount, resetWindow } from "@/lib/commands";
+import { getMonitorCount, manualUpdateCheck, resetWindow } from "@/lib/commands";
 import { ThemePanel } from "@/components/ThemePanel";
 import { KeybindInput } from "@/components/KeybindInput";
 import { SaveClipCalibration } from "@/components/SaveClipCalibration";
@@ -630,6 +630,32 @@ export function SettingsForm({ config, onConfigChange }: SettingsFormProps) {
           </p>
         </div>
         <GameOverridesEditor config={config} onConfigChange={onConfigChange} />
+      </section>
+
+      <Separator />
+
+      <section className="space-y-3">
+        <h3 className="text-sm font-semibold">Updates</h3>
+        <div className="flex items-center justify-between">
+          <div className="pr-2">
+            <Label className="text-xs">Check for updates on launch</Label>
+            <p className="text-[10px] text-t-muted">
+              Never installs silently — a found update always asks first.
+            </p>
+          </div>
+          <Switch
+            checked={config.check_updates}
+            onCheckedChange={(v) => update({ check_updates: v })}
+          />
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-7 text-xs"
+          onClick={() => manualUpdateCheck().catch((e) => toastError(errorMessage(e)))}
+        >
+          Check for updates now
+        </Button>
       </section>
 
       <Separator />

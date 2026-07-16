@@ -2,6 +2,12 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
+    // Velopack hooks must run before ANYTHING else: during install/update/
+    // uninstall Velopack relaunches the exe with special arguments
+    // (--veloapp-*) and this call handles them and exits. On a normal launch
+    // it's a no-op.
+    velopack::VelopackApp::build().run();
+
     // Tauri's NSIS template, when invoked by the updater (passive + /R),
     // calls nsis_tauri_utils::RunAsUser from .onInstSuccess to relaunch
     // the new binary BEFORE the installer process has fully exited. If

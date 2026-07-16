@@ -1,6 +1,6 @@
 # Master Verification Checklist (2026-07-10)
 
-**Updated:** 2026-07-15 (adds §19 themed tray menu; §18 icon item added 07-14)
+**Updated:** 2026-07-15 (adds §20 update pipeline, §19 themed tray menu; §18 icon item 07-14)
 
 Everything code-verified but not yet exercised live, across three batches:
 the 2026-07-02 QoL batch (undo, pause, clickable log, autostart, window
@@ -403,3 +403,38 @@ reacts when the thief is our own process.
 - [ ] Clicking overlay buttons with the mouse also must not minimize the
       game (click-time focus grabs are outside the show-time watchdog —
       report if this still reproduces)
+
+## 20. GitHub + in-app update pipeline
+
+Shipped 2026-07-15 (MicGuard-pattern, Velopack engine). New `updater.rs`:
+startup check (config `check_updates`, default on, 5s delayed) and manual
+check (Settings → Updates → "Check for updates now", tray → "Check for
+updates"). Installed builds update via Velopack `UpdateManager` against
+`https://github.com/Bristopher/GKeyMover/releases/latest/download/`
+(delta-capable) after a consent dialog; portable/dev builds fall back to a
+GitHub API version check and open the releases page. `VelopackApp::build()
+.run()` added at the top of `main()`. `build-release.ps1` now: clean-tree +
+gh-auth guards, version from git tags, stamp, build, `vpk download github`
+(deltas) + `vpk pack`, commit `Release vX.Y.Z`, tag, push, `gh release
+create` with the Velopack feed files under original names. Docs:
+`RELEASING.md`, rewritten `README.md`.
+
+**Automated coverage** — 108 cargo tests (3 new: version parse/compare),
+zero warnings, `tsc` + `pnpm build` clean. Human items (most need the repo
+pushed and one release published):
+
+- [ ] `gh repo create GKeyMover --public --source . --push` succeeded and
+      the repo looks right (no `Releases/`, `target/`, `node_modules/`)
+- [ ] Run `.\build-release.ps1` for the first release: tag pushed, GitHub
+      release has releases.win.json + RELEASES + .nupkg + setup + portable
+- [ ] Install via the setup exe, then publish a second (patch) release:
+      the installed app's startup check offers it, "Update now" downloads,
+      restarts into the new version (check Settings version)
+- [ ] "Later" on the dialog does nothing and doesn't re-nag until next
+      launch/manual check
+- [ ] Portable exe: check offers the releases page instead of self-update
+- [ ] Settings → Updates toggle off: no startup dialog appears
+- [ ] Manual check while up to date shows the "You're on the latest
+      version" dialog (not silence)
+- [ ] `vpk download github` on the second release produced a delta nupkg
+      and the update download was small

@@ -38,6 +38,8 @@ tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
 futures-util = "0.3"
 regex = "1"
 opener = { version = "0.7", features = ["reveal"] }
+velopack = "0.0.1298"
+ureq = { version = "2", features = ["json"] }
 tauri-plugin-autostart = "2"
 windows-sys = { version = "0.59", features = [
     "Win32_UI_Input_KeyboardAndMouse",

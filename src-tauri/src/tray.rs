@@ -19,7 +19,7 @@ pub const MENU_LABEL: &str = "traymenu";
 /// `TrayMenuApp.tsx` — the window is fixed-size and the content is designed
 /// to fill it exactly.
 const MENU_WIDTH: f64 = 224.0;
-const MENU_HEIGHT: f64 = 246.0;
+const MENU_HEIGHT: f64 = 274.0;
 
 pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     // Pre-create the (hidden) menu window.

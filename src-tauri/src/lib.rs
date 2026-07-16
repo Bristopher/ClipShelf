@@ -16,6 +16,7 @@ mod stats;
 mod theme;
 mod timer;
 mod tray;
+mod updater;
 mod watcher;
 mod window_layout;
 
@@ -110,6 +111,9 @@ pub fn run() {
             if let Err(e) = tray::setup_tray(&app_handle) {
                 log::error!("Failed to set up system tray: {}", e);
             }
+
+            // Startup update check (consent-based; config-gated).
+            updater::spawn_startup_check(app_handle.clone(), config.check_updates);
 
             // Spawn two independent timers:
             //   - `timer_tx`: auto-wipe timer that fires when a new clip
@@ -663,6 +667,7 @@ pub fn run() {
             commands::full_quit,
             commands::show_main_window,
             commands::hide_tray_menu,
+            updater::manual_update_check,
             commands::undo_last_action,
             commands::reveal_in_explorer,
             commands::set_watch_paused,

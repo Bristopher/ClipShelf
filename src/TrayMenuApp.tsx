@@ -8,6 +8,7 @@ import {
   Pause,
   Play,
   Power,
+  RefreshCw,
   ScrollText,
 } from "lucide-react";
 import {
@@ -15,6 +16,7 @@ import {
   getConfig,
   getDiagnostics,
   hideTrayMenu,
+  manualUpdateCheck,
   openFolder,
   setWatchPaused,
   showMainWindow,
@@ -129,9 +131,14 @@ export function TrayMenuApp() {
             onClick={() => run(() => openFolder(`${folder}\\logs`))}
           />
           <MenuItem
+            icon={<RefreshCw className="h-3.5 w-3.5" />}
+            label="Check for updates"
+            onClick={() => run(manualUpdateCheck)}
+          />
+          <MenuItem
             icon={<HelpCircle className="h-3.5 w-3.5" />}
             label="Help"
-            onClick={() => run(() => openFolder("https://github.com"))}
+            onClick={() => run(() => openFolder("https://github.com/Bristopher/GKeyMover"))}
           />
         </div>
         <div className="h-px bg-t-border mx-1.5" />

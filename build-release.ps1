@@ -1,129 +1,175 @@
-# build-release.ps1 — run from project root: .\build-release.ps1
+# build-release.ps1 — one command releases a new GKey Mover version.
+# See RELEASING.md. Requires: pnpm, vpk (Velopack CLI), gh (logged in).
+#
+# Usage:
+#   .\build-release.ps1                    # interactive: suggests next version
+#   .\build-release.ps1 -Version 2.1.0     # non-interactive, exact version
+#   .\build-release.ps1 -Bump minor        # bump from the latest released tag
+#   .\build-release.ps1 -Version 2.1.0 -Notes "..."   # with release notes
+#   .\build-release.ps1 -LocalOnly         # build + pack only (no git/GitHub)
+param(
+    [string]$Version = '',
+    [ValidateSet('patch', 'minor', 'major')]
+    [string]$Bump = '',
+    [string]$Notes = '',
+    [switch]$LocalOnly
+)
 $ErrorActionPreference = "Stop"
 $ProjectRoot = $PSScriptRoot
+Set-Location $ProjectRoot
 
-# ── Detect next version ──────────────────────────────────────────────────────
-# Seed the suggestion from the highest of: (a) the existing Releases folders and
-# (b) the version already baked into tauri.conf.json. Taking the max of both
-# guards against ever suggesting a version BEHIND the shipped manifest (which
-# would write a downgrade into the app's Settings display) if the Releases
-# folder is cleaned or the manifest was hand-bumped ahead of it.
-$ReleasesDir = Join-Path $ProjectRoot "src-tauri\Releases"
-$tauriConf   = Join-Path $ProjectRoot "src-tauri\tauri.conf.json"
+$GithubRepo = "Bristopher/GKeyMover"
 
-# Collect every version we know about as sortable [version] objects.
-$known = @()
-
-if (Test-Path $ReleasesDir) {
-    $known += Get-ChildItem $ReleasesDir -Directory |
-        Where-Object { $_.Name -match '^v(\d+)\.(\d+)\.(\d+)$' } |
-        ForEach-Object { [version]($_.Name.TrimStart('v')) }
+# ── Guards ────────────────────────────────────────────────────────────────────
+if (-not $LocalOnly) {
+    if (git status --porcelain) {
+        throw "Working tree is not clean - commit or stash your changes first."
+    }
+    gh auth status *> $null
+    if ($LASTEXITCODE -ne 0) { throw "gh CLI is not logged in - run: gh auth login" }
 }
 
-# The version currently in tauri.conf.json (the one the app shows in Settings).
+# ── Detect next version from released git tags (MicGuard-style) ──────────────
+$tauriConf = Join-Path $ProjectRoot "src-tauri\tauri.conf.json"
 $confRaw = Get-Content $tauriConf -Raw
-if ($confRaw -match '"version":\s*"(\d+\.\d+\.\d+)"') {
-    $known += [version]$Matches[1]
-    Write-Host "Current manifest version: v$($Matches[1])"
+if ($confRaw -notmatch '"version":\s*"(\d+)\.(\d+)\.(\d+)"') {
+    throw 'version "x.y.z" not found in tauri.conf.json'
 }
+$current = "$($Matches[1]).$($Matches[2]).$($Matches[3])"
 
-if ($known.Count -gt 0) {
-    $latest = $known | Sort-Object | Select-Object -Last 1
-    $suggestedVersion = "$($latest.Major).$($latest.Minor).$($latest.Build + 1)"
-    Write-Host "Highest known version: v$latest"
+$latestTag = git tag --list 'v*' |
+    Where-Object { $_ -match '^v(\d+)\.(\d+)\.(\d+)$' } |
+    ForEach-Object { [version]($_.TrimStart('v')) } |
+    Sort-Object | Select-Object -Last 1
+
+if ($latestTag) {
+    Write-Host "Latest released tag:   v$latestTag"
+    # If the manifest is already ahead of the tags (pre-bumped for a local
+    # test build), suggest releasing exactly that; else bump the tag's patch.
+    $suggested = if ([version]$current -gt $latestTag) { $current } else {
+        "$($latestTag.Major).$($latestTag.Minor).$($latestTag.Build + 1)"
+    }
+    $bumpBase = $latestTag
 } else {
-    $suggestedVersion = "2.0.0"
+    $suggested = $current
+    $bumpBase = [version]$current
 }
+Write-Host "Manifest version:      v$current"
 
-# ── Prompt ────────────────────────────────────────────────────────────────────
-Write-Host "Suggested next version: v$suggestedVersion"
-$userInput = Read-Host "Press Enter to accept, or type a custom version (e.g. 2.1.0)"
-$version = if ($userInput.Trim() -ne "") { $userInput.Trim().TrimStart('v') } else { $suggestedVersion }
-
+# ── Decide the version: -Version > -Bump > interactive prompt ────────────────
+if ($Version) {
+    $new = $Version.Trim().TrimStart('v')
+} elseif ($Bump) {
+    $major, $minor, $patch = $bumpBase.Major, $bumpBase.Minor, $bumpBase.Build
+    switch ($Bump) {
+        'major' { $major++; $minor = 0; $patch = 0 }
+        'minor' { $minor++; $patch = 0 }
+        'patch' { $patch++ }
+    }
+    $new = "$major.$minor.$patch"
+} else {
+    Write-Host "Suggested next version: v$suggested"
+    $userInput = Read-Host "Press Enter to accept, or type a custom version (e.g. 2.1.0)"
+    $new = if ($userInput.Trim() -ne "") { $userInput.Trim().TrimStart('v') } else { $suggested }
+}
+if ($new -notmatch '^\d+\.\d+\.\d+$') { throw "Invalid version '$new' - expected x.y.z" }
+if (-not $LocalOnly -and (git tag --list "v$new")) {
+    throw "Tag v$new already exists - pick a different version."
+}
 Write-Host ""
-Write-Host "Building v$version..." -ForegroundColor Cyan
+Write-Host "Releasing v$new" -ForegroundColor Green
 
-# ── Update tauri.conf.json (this is what the app shows in Settings) ───────────
-$conf = Get-Content $tauriConf -Raw
-$conf = $conf -replace '"version":\s*"\d+\.\d+\.\d+"', "`"version`": `"$version`""
+# ── Stamp tauri.conf.json + Cargo.toml ────────────────────────────────────────
+$conf = $confRaw -replace '"version":\s*"\d+\.\d+\.\d+"', "`"version`": `"$new`""
 Set-Content $tauriConf $conf -Encoding UTF8 -NoNewline
-Write-Host "  Updated tauri.conf.json -> $version"
 
-# ── Update Cargo.toml ─────────────────────────────────────────────────────────
 $cargoToml = Join-Path $ProjectRoot "src-tauri\Cargo.toml"
-$cargo = Get-Content $cargoToml -Raw
-$cargo = $cargo -replace '(?m)^version = "\d+\.\d+\.\d+"', "version = `"$version`""
-Set-Content $cargoToml $cargo -Encoding UTF8 -NoNewline
-Write-Host "  Updated Cargo.toml -> $version"
+(Get-Content $cargoToml -Raw) -replace '(?m)^version = "\d+\.\d+\.\d+"', "version = `"$new`"" |
+    Set-Content $cargoToml -Encoding UTF8 -NoNewline
+Write-Host "  Stamped tauri.conf.json + Cargo.toml -> $new"
 
 # ── Step 1: Tauri build ───────────────────────────────────────────────────────
 Write-Host ""
-Write-Host "Step 1 — Building with Tauri..." -ForegroundColor Yellow
-Set-Location $ProjectRoot
-
-# Try cargo tauri first, fall back to pnpm tauri
-$tauriCmd = $null
+Write-Host "Step 1 - Building with Tauri..." -ForegroundColor Yellow
 if (Get-Command "cargo-tauri" -ErrorAction SilentlyContinue) {
-    $tauriCmd = "cargo"
-    $tauriArgs = @("tauri", "build")
-} elseif (Get-Command "pnpm" -ErrorAction SilentlyContinue) {
-    $tauriCmd = "pnpm"
-    $tauriArgs = @("tauri", "build")
+    cargo tauri build
 } else {
-    throw "Neither 'cargo tauri' nor 'pnpm' found. Install tauri-cli: cargo install tauri-cli --version '^2'"
+    pnpm tauri build
 }
-
-& $tauriCmd @tauriArgs
 if ($LASTEXITCODE -ne 0) { throw "Tauri build failed" }
 
-# ── Step 2: Velopack pack ─────────────────────────────────────────────────────
+# ── Step 2: Velopack pack (with deltas against the published feed) ───────────
 Write-Host ""
-Write-Host "Step 2 — Packaging with Velopack..." -ForegroundColor Yellow
+Write-Host "Step 2 - Packaging with Velopack..." -ForegroundColor Yellow
 
-$outDir = Join-Path $ProjectRoot "src-tauri\Releases\v$version"
+$outDir = Join-Path $ProjectRoot "src-tauri\Releases\v$new"
 if (Test-Path $outDir) {
-    Write-Host ""
-    Write-Host "  WARNING: Release v$version already exists at:" -ForegroundColor Yellow
-    Write-Host "  $outDir" -ForegroundColor White
+    Write-Host "  Release v$new already exists at $outDir" -ForegroundColor Yellow
     $overwrite = Read-Host "  Overwrite? [y/N]"
-    if ($overwrite.Trim().ToLower() -ne "y") {
-        throw "Aborted — release v$version already exists."
-    }
+    if ($overwrite.Trim().ToLower() -ne "y") { throw "Aborted." }
     Remove-Item $outDir -Recurse -Force
-    Write-Host "  Deleted existing release folder." -ForegroundColor DarkGray
 }
 
 Set-Location (Join-Path $ProjectRoot "src-tauri")
-vpk pack --packId com.cbuzi.gkey-mover-v2 --packTitle "GKey Mover" --packVersion $version --packDir "target/release" --mainExe "gkey-mover-v2.exe" --icon "icons/icon.ico" --outputDir "Releases/v$version"
+
+# Download the previously published release from GitHub first so vpk can
+# generate a DELTA package (small download for updaters). Harmless if this
+# is the first release or offline - full packages still work.
+if (-not $LocalOnly) {
+    vpk download github --repoUrl "https://github.com/$GithubRepo" --outputDir "Releases/v$new"
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  (no previous GitHub release found - building full package only)" -ForegroundColor DarkGray
+    }
+}
+
+vpk pack --packId com.cbuzi.gkey-mover-v2 --packTitle "GKey Mover" --packVersion $new --packDir "target/release" --mainExe "gkey-mover-v2.exe" --icon "icons/icon.ico" --outputDir "Releases/v$new"
 if ($LASTEXITCODE -ne 0) { throw "vpk pack failed" }
 
-# ── Step 3: Rename setup installer ────────────────────────────────────────────
-Write-Host ""
-Write-Host "Step 3 — Renaming release files..." -ForegroundColor Yellow
-$outDir = Join-Path $ProjectRoot "src-tauri\Releases\v$version"
-
+# ── Step 3: Rename setup + copy portable ──────────────────────────────────────
 $setupSrc = Join-Path $outDir "com.cbuzi.gkey-mover-v2-win-Setup.exe"
-$setupDst = Join-Path $outDir "GKeyMover_${version}_x64-setup.exe"
-if (Test-Path $setupSrc) {
-    Rename-Item $setupSrc $setupDst
-    Write-Host "  Setup   -> GKeyMover_${version}_x64-setup.exe" -ForegroundColor Green
-}
+$setupDst = Join-Path $outDir "GKeyMover_${new}_x64-setup.exe"
+if (Test-Path $setupSrc) { Rename-Item $setupSrc $setupDst }
 
-# ── Step 4: Copy portable exe ────────────────────────────────────────────────
-Write-Host ""
-Write-Host "Step 4 — Copying portable exe..." -ForegroundColor Yellow
 $portableSrc = Join-Path $ProjectRoot "src-tauri\target\release\gkey-mover-v2.exe"
-$portableDst = Join-Path $outDir "GKeyMover_${version}_x64-Portable.exe"
-if (Test-Path $portableSrc) {
-    Copy-Item $portableSrc $portableDst
-    Write-Host "  Portable -> GKeyMover_${version}_x64-Portable.exe" -ForegroundColor Green
+$portableDst = Join-Path $outDir "GKeyMover_${new}_x64-Portable.exe"
+if (Test-Path $portableSrc) { Copy-Item $portableSrc $portableDst }
+
+Set-Location $ProjectRoot
+
+if ($LocalOnly) {
+    Write-Host ""
+    Write-Host "Done (local only): v$new packaged at $outDir - nothing pushed or published." -ForegroundColor Green
+    exit 0
 }
 
-# ── Done ──────────────────────────────────────────────────────────────────────
+# ── Step 4: Commit, tag, push ─────────────────────────────────────────────────
 Write-Host ""
-Write-Host "Done! Release v$version ready at:" -ForegroundColor Green
+Write-Host "Step 4 - Commit, tag, push..." -ForegroundColor Yellow
+git add "src-tauri/tauri.conf.json" "src-tauri/Cargo.toml" "src-tauri/Cargo.lock"
+if (git status --porcelain) { git commit -m "Release v$new" }
+git tag -a "v$new" -m "v$new"
+git push origin main "v$new"
+
+# ── Step 5: Publish the GitHub release ────────────────────────────────────────
+# The Velopack feed files (releases.win.json, *.nupkg, RELEASES) MUST be
+# attached with their original names - the in-app updater fetches them via
+# releases/latest/download/. Setup + portable ride along for manual installs.
+Write-Host ""
+Write-Host "Step 5 - Publishing GitHub release..." -ForegroundColor Yellow
+if (-not $Notes) { $Notes = "GKey Mover v$new" }
+
+$assets = Get-ChildItem $outDir -File | Where-Object {
+    $_.Name -in @("releases.win.json", "RELEASES", "assets.win.json") -or
+    $_.Name -like "*.nupkg" -or
+    $_.Name -like "GKeyMover_*"
+} | ForEach-Object { $_.FullName }
+
+gh release create "v$new" @assets --repo $GithubRepo --title "GKey Mover v$new" --notes $Notes
+if ($LASTEXITCODE -ne 0) { throw "gh release create failed" }
+
+Write-Host ""
+Write-Host "Done: v$new published. Running apps will offer the update on next launch." -ForegroundColor Green
 Get-ChildItem $outDir | ForEach-Object {
     $sizeMB = [math]::Round($_.Length / 1MB, 1)
-    Write-Host "  $($_.Name) (${sizeMB} MB)" -ForegroundColor White
+    Write-Host "  $($_.Name) (${sizeMB} MB)"
 }
-Set-Location $ProjectRoot

@@ -44,6 +44,7 @@ fn default_monitor() -> u32 { 2 }
 fn default_anchor() -> String { "top-left".to_string() }
 fn default_rename_mru() -> Vec<String> { Vec::new() }
 fn default_game_detection_enabled() -> bool { true }
+fn default_check_updates() -> bool { true }
 fn default_write_file_properties() -> bool { true }
 fn default_day_rollover_hour() -> u8 { 4 }
 fn default_game_overrides() -> Vec<GameOverride> { Vec::new() }
@@ -222,6 +223,11 @@ pub struct AppConfig {
     #[serde(default = "default_game_detection_enabled")]
     pub game_detection_enabled: bool,
 
+    /// Check GitHub for a newer release on launch and offer it (never
+    /// installs silently — the user always confirms via dialog).
+    #[serde(default = "default_check_updates")]
+    pub check_updates: bool,
+
     /// Mirror game/rating/description into Windows file properties
     /// (Explorer Tags/Rating/Comments). history.jsonl is written regardless.
     #[serde(default = "default_write_file_properties")]
@@ -301,6 +307,7 @@ impl Default for AppConfig {
             default_anchor: default_anchor(),
             rename_mru: default_rename_mru(),
             game_detection_enabled: default_game_detection_enabled(),
+            check_updates: default_check_updates(),
             write_file_properties: default_write_file_properties(),
             day_rollover_hour: default_day_rollover_hour(),
             game_overrides: default_game_overrides(),
