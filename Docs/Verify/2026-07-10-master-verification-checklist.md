@@ -1,6 +1,6 @@
 # Master Verification Checklist (2026-07-10)
 
-**Updated:** 2026-07-15 (adds §20 update pipeline, §19 themed tray menu; §18 icon item 07-14)
+**Updated:** 2026-07-16 (adds §21 recording detection; §19-20 added 07-15)
 
 Everything code-verified but not yet exercised live, across three batches:
 the 2026-07-02 QoL batch (undo, pause, clickable log, autostart, window
@@ -438,3 +438,40 @@ pushed and one release published):
       version" dialog (not silence)
 - [ ] `vpk download github` on the second release produced a delta nupkg
       and the update download was small
+
+## 21. Recording detection (clip vs continuous recording)
+
+Shipped 2026-07-16. New files are now CLASSIFIED before the clip flow runs:
+`classify_and_process` probes the file's exclusive write lock (1s cadence,
+10 attempts). Released within ~10s → replay clip → normal flow (current
+file, history, sound, timer). Still locked → an OBS recording being written
+→ logs "Recording in progress: <name> — it will be ready to sort when it
+finishes", captures the game snapshot immediately, and polls every 5s (12h
+cap) until OBS releases the file; then logs "Recording finished (<N> min)"
+and runs the full clip flow with the recording-start game. The dedup gate
+was extracted (`created_dedup_gate`) and re-checked at recording finish so
+an OBS-WS record-stop event can't double-process. Side effects: clip
+log/sound now fire when OBS finishes writing (~1s later than before), and
+file size is read post-write, so "0.0MB possible black screen" false
+positives on healthy clips should mostly disappear. Classification runs on
+a spawned task, so clips saved while a recording is being classified are
+not delayed.
+
+**Automated coverage** — 108 cargo tests, zero warnings (no automated test
+can hold a real exclusive lock through the async runtime; classification is
+manual-verify). Human items:
+
+- [ ] Start an OBS RECORDING: log shows "Recording in progress" (no clip
+      sound, no timer, G-keys do NOT act on the recording file)
+- [ ] Save a replay-buffer CLIP while the recording is still running: the
+      clip is processed normally and G-keys sort the CLIP, not the recording
+- [ ] Stop the recording (test both short <10min and long >30min): log
+      shows "Recording finished (N min)", the file becomes the current clip,
+      sound + timer fire, history gains a created row with the game that was
+      focused when the recording STARTED, property write succeeds (no more
+      "file still locked after 5 attempts" for recordings)
+- [ ] Normal clips still work: saved clip appears in the log within ~1-2s
+      with a correct (non-0.0MB) size, sound plays, calibration deltas look
+      unchanged
+- [ ] Delete a recording file while it's being monitored: "Recording
+      disappeared before finishing" warning, no crash

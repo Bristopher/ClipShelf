@@ -721,7 +721,13 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
-/// Handle a newly created file from the watcher.
+/// Handle a newly created file from the watcher, OBS-WS, or the health-check
+/// rescan. Runs the dedup gate, then classifies the file in a background
+/// task: if OBS releases its exclusive write lock within a few seconds it's
+/// a replay-buffer clip → normal clip flow. If the lock is held longer it's
+/// a RECORDING still being written — the clip flow (current-file arming,
+/// history, sound, timer) is deferred until the recording finishes, so
+/// G-keys can never move/rename a file OBS holds open.
 async fn handle_file_created(
     app: &tauri::AppHandle,
     state: &AppState,
@@ -729,31 +735,214 @@ async fn handle_file_created(
     config: &AppConfig,
     path: PathBuf,
 ) {
-    // Dedup: the same clip can be reported twice — OBS WebSocket + folder
-    // watcher (or the health-check rescan). First signal wins; anything
-    // re-reporting the same raw path within 10s is dropped. Also the single
-    // choke point for pause: no source may inject files while paused.
-    //
-    // Check AND mark in one critical section — the OBS-WS handler and the
-    // watcher handler are independent tasks, so a check-then-mark-later
-    // pattern lets both pass the check for the same clip before either
-    // records it (double log entry, double sound, timer restarted twice).
-    {
+    if !created_dedup_gate(state, &path) {
+        return;
+    }
+    let arrival = std::time::SystemTime::now();
+    let app = app.clone();
+    let state = state.clone();
+    let timer_tx = timer_tx.clone();
+    let config = config.clone();
+    // Classification probes + sleeps must not stall the caller's event loop
+    // (a clip saved while a recording is being classified would wait).
+    tauri::async_runtime::spawn(async move {
+        classify_and_process(app, state, timer_tx, config, path, arrival).await;
+    });
+}
+
+/// Dedup: the same clip can be reported twice — OBS WebSocket + folder
+/// watcher (or the health-check rescan, or the recording monitor finishing).
+/// First signal wins; anything re-reporting the same raw path within 10s is
+/// dropped. Also the single choke point for pause: no source may inject
+/// files while paused.
+///
+/// Check AND mark in one critical section — the reporting tasks are
+/// independent, so a check-then-mark-later pattern lets two of them pass the
+/// check for the same clip before either records it (double log entry,
+/// double sound, timer restarted twice).
+fn created_dedup_gate(state: &AppState, path: &PathBuf) -> bool {
+    let mut s = state.lock().unwrap();
+    if s.watch_paused {
+        return false;
+    }
+    if let (Some(prev), Some(at)) = (&s.last_created_path, s.last_file_created_at) {
+        if *prev == *path
+            && at.elapsed().unwrap_or_default() < std::time::Duration::from_secs(10)
+        {
+            return false;
+        }
+    }
+    s.last_created_path = Some(path.clone());
+    s.last_file_created_at = Some(std::time::SystemTime::now());
+    true
+}
+
+/// How long a new file may stay exclusively locked before it's classified as
+/// an in-progress recording instead of a clip. Replay-buffer clips finish
+/// writing (and release the lock) well within a couple of seconds.
+const CLIP_CLASSIFY_ATTEMPTS: u32 = 10;
+const CLIP_CLASSIFY_INTERVAL_SECS: u64 = 1;
+/// Poll cadence + cap while waiting for a recording to finish.
+const RECORDING_POLL_SECS: u64 = 5;
+const RECORDING_MAX_SECS: u64 = 12 * 60 * 60;
+
+/// The game snapshot for a new clip: prefer the snapshot taken at the
+/// save-press instant; fall back to "what's focused right now" for files
+/// that arrived without a hotkey press (watcher-only / OBS event).
+async fn resolve_game_snapshot(
+    state: &AppState,
+    config: &AppConfig,
+) -> Option<gamedetect::GameSnapshot> {
+    let taken = {
         let mut s = state.lock().unwrap();
-        if s.watch_paused {
+        s.take_pending_game(std::time::Duration::from_secs(30))
+    };
+    match taken {
+        Some(snap) => Some(snap),
+        None if config.game_detection_enabled => {
+            let overrides = config.game_overrides.clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                gamedetect::snapshot_foreground(&overrides)
+            })
+            .await
+            .ok()
+            .flatten()
+        }
+        None => None,
+    }
+}
+
+/// Classify a freshly created video file (clip vs in-progress recording) and
+/// run the clip flow at the right moment.
+async fn classify_and_process(
+    app: tauri::AppHandle,
+    state: AppState,
+    timer_tx: mpsc::Sender<TimerCommand>,
+    config: AppConfig,
+    path: PathBuf,
+    arrival: std::time::SystemTime,
+) {
+    let filename = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unknown")
+        .to_string();
+
+    for _ in 0..CLIP_CLASSIFY_ATTEMPTS {
+        if !path.exists() {
+            log::info!("created file vanished during classification: {}", filename);
             return;
         }
-        if let (Some(prev), Some(at)) = (&s.last_created_path, s.last_file_created_at) {
-            if *prev == path
-                && at.elapsed().unwrap_or_default() < std::time::Duration::from_secs(10)
-            {
-                return;
-            }
+        let p = path.clone();
+        let free = tauri::async_runtime::spawn_blocking(move || props::probe_exclusive(&p))
+            .await
+            .unwrap_or(false);
+        if free {
+            process_clip(&app, &state, &timer_tx, &config, path, arrival, None).await;
+            return;
         }
-        s.last_created_path = Some(path.clone());
-        s.last_file_created_at = Some(std::time::SystemTime::now());
+        tokio::time::sleep(std::time::Duration::from_secs(CLIP_CLASSIFY_INTERVAL_SECS)).await;
     }
 
+    // Exclusively held past the classification window: OBS is still writing
+    // — this is a recording, not a clip. Capture the game NOW (what's being
+    // recorded is focused now, not whatever happens to be focused when the
+    // recording eventually stops), then wait for the lock to release.
+    let game_snap = resolve_game_snapshot(&state, &config).await;
+    {
+        let mut s = state.lock().unwrap();
+        let entry = s.logger.log_with_path(
+            LogLevel::Info,
+            format!(
+                "Recording in progress: {} — it will be ready to sort when it finishes",
+                filename
+            ),
+            LogCategory::FileCreated,
+            Some(path.to_string_lossy().to_string()),
+        );
+        let _ = app.emit("log-entry", &entry);
+    }
+
+    let started = std::time::Instant::now();
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(RECORDING_POLL_SECS)).await;
+        if !path.exists() {
+            let mut s = state.lock().unwrap();
+            let entry = s.logger.log(
+                LogLevel::Warning,
+                format!("Recording disappeared before finishing: {}", filename),
+                LogCategory::FileCreated,
+            );
+            let _ = app.emit("log-entry", &entry);
+            return;
+        }
+        let p = path.clone();
+        let free = tauri::async_runtime::spawn_blocking(move || props::probe_exclusive(&p))
+            .await
+            .unwrap_or(false);
+        if free {
+            break;
+        }
+        if started.elapsed().as_secs() > RECORDING_MAX_SECS {
+            log::warn!(
+                "recording monitor: {} still locked after 12h — giving up",
+                filename
+            );
+            return;
+        }
+    }
+
+    // The OBS-WS record-stop event (or a watcher rescan) may report the file
+    // again right as it unlocks — same gate as any other creation source.
+    if !created_dedup_gate(&state, &path) {
+        return;
+    }
+    // Settings may have changed during a long recording — use the live ones.
+    let config = {
+        let s = state.lock().unwrap();
+        s.config.clone()
+    };
+    let mins = started.elapsed().as_secs() / 60;
+    {
+        let mut s = state.lock().unwrap();
+        let entry = s.logger.log_with_path(
+            LogLevel::Info,
+            format!(
+                "Recording finished: {} ({} min) — treating it as a clip now",
+                filename,
+                mins.max(1)
+            ),
+            LogCategory::FileCreated,
+            Some(path.to_string_lossy().to_string()),
+        );
+        let _ = app.emit("log-entry", &entry);
+    }
+    process_clip(
+        &app,
+        &state,
+        &timer_tx,
+        &config,
+        path,
+        std::time::SystemTime::now(),
+        Some(game_snap),
+    )
+    .await;
+}
+
+/// The full clip flow: current-file arming, calibration sample, game
+/// detection, history + property write, log/sound/event/timer. `arrival` is
+/// when the file was first reported (calibration measures against it).
+/// `game_override`: `Some(snap)` uses a snapshot resolved earlier (recording
+/// flow); `None` resolves one now.
+async fn process_clip(
+    app: &tauri::AppHandle,
+    state: &AppState,
+    timer_tx: &mpsc::Sender<TimerCommand>,
+    config: &AppConfig,
+    path: PathBuf,
+    arrival: std::time::SystemTime,
+    game_override: Option<Option<gamedetect::GameSnapshot>>,
+) {
     let size_mb = mover::file_size_mb(&path);
     let is_warning = size_mb < config.small_file_warn_mb;
 
@@ -775,8 +964,10 @@ async fn handle_file_created(
         });
         s.bind_chosen = None;
         // (last_created_path / last_file_created_at were already recorded in
-        // the dedup critical section above.)
-        let now = std::time::SystemTime::now();
+        // the dedup gate.) Calibration measures save-press → file-appearance,
+        // so it uses the ARRIVAL time — classification probes must not skew
+        // the sample.
+        let now = arrival;
 
         // Calibration recording — if a save was pending, record the delta.
         let mut emit: Option<serde_json::Value> = None;
@@ -844,27 +1035,11 @@ async fn handle_file_created(
         let _ = app.emit("calibration-event", payload);
     }
 
-    // Game detection: prefer the snapshot from the save-press instant;
-    // fall back to "what's focused right now" for clips that arrived
-    // without a hotkey press (watcher-only / OBS event).
-    let game_snap: Option<gamedetect::GameSnapshot> = {
-        let taken = {
-            let mut s = state.lock().unwrap();
-            s.take_pending_game(std::time::Duration::from_secs(30))
-        };
-        match taken {
-            Some(snap) => Some(snap),
-            None if config.game_detection_enabled => {
-                let overrides = config.game_overrides.clone();
-                tauri::async_runtime::spawn_blocking(move || {
-                    gamedetect::snapshot_foreground(&overrides)
-                })
-                .await
-                .ok()
-                .flatten()
-            }
-            None => None,
-        }
+    // Game detection: the recording flow passes a snapshot resolved when the
+    // recording was detected; everything else resolves one now.
+    let game_snap: Option<gamedetect::GameSnapshot> = match game_override {
+        Some(snap) => snap,
+        None => resolve_game_snapshot(state, config).await,
     };
     let game: Option<String> = game_snap.as_ref().map(|s| s.label.clone());
     let (config_path, hist_event) = {
