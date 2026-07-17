@@ -24,7 +24,7 @@ const MENU_HEIGHT: f64 = 274.0;
 pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     // Pre-create the (hidden) menu window.
     if let Err(e) = WebviewWindowBuilder::new(app, MENU_LABEL, WebviewUrl::App(std::path::PathBuf::new()))
-        .title("GKey Mover — Tray Menu")
+        .title("ClipShelf — Tray Menu")
         .inner_size(MENU_WIDTH, MENU_HEIGHT)
         .resizable(false)
         .decorations(false)
@@ -44,7 +44,7 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 
     TrayIconBuilder::new()
         .icon(icon)
-        .tooltip(format!("GKey Mover v{}", env!("CARGO_PKG_VERSION")))
+        .tooltip(format!("ClipShelf v{}", env!("CARGO_PKG_VERSION")))
         .on_tray_icon_event(|tray, event| {
             if let TrayIconEvent::Click {
                 button,

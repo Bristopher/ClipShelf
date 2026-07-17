@@ -1,7 +1,7 @@
-# Gkey Mover v2
+# ClipShelf (formerly Gkey Mover v2)
 
 ## What This Is
-Tauri v2 desktop app (Rust backend + React frontend) for sorting/renaming OBS/ShadowPlay video clips via G-key hotkeys. Rewrite of the Python/Tkinter v1.
+Tauri v2 desktop app (Rust backend + React frontend) for sorting/renaming OBS/ShadowPlay video clips via G-key hotkeys. Rewrite of the Python/Tkinter v1. Renamed to ClipShelf 2026-07-17; internal IDs deliberately keep the old name — the Velopack packId / Tauri identifier `com.cbuzi.gkey-mover-v2`, the `gkey-mover-v2` crate/exe name, and the `%APPDATA%\com.cbuzi.gkey-mover-v2` config dir must NEVER change (installed apps update and locate config by them).
 
 ## Architecture
 - Rust backend owns all state. React is a pure view layer.

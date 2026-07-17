@@ -1,4 +1,4 @@
-# GKey Mover
+# ClipShelf
 
 Sort and rename OBS / ShadowPlay clips the moment you save them — with
 G-key hotkeys, automatic game detection, a clip history, and an in-game
@@ -26,11 +26,11 @@ Windows desktop app built with Tauri v2 (Rust backend, React frontend).
 ## Install
 
 Grab the latest release from
-[Releases](https://github.com/Bristopher/GKeyMover/releases/latest):
+[Releases](https://github.com/Bristopher/ClipShelf/releases/latest):
 
-- `GKeyMover_x.y.z_x64-setup.exe` — installer (recommended; enables
+- `ClipShelf_x.y.z_x64-setup.exe` — installer (recommended; enables
   in-place delta updates)
-- `GKeyMover_x.y.z_x64-Portable.exe` — single-file portable build
+- `ClipShelf_x.y.z_x64-Portable.exe` — single-file portable build
   (update checks open the releases page instead of self-updating)
 
 ## Develop

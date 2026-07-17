@@ -593,7 +593,7 @@ pub fn run() {
                 "settings",
                 WebviewUrl::App(std::path::PathBuf::new()),
             )
-            .title("GKey Mover — Settings")
+            .title("ClipShelf — Settings")
             .inner_size(640.0, 720.0)
             .min_inner_size(500.0, 500.0)
             .resizable(true)
@@ -608,7 +608,7 @@ pub fn run() {
                 "first-run",
                 WebviewUrl::App(std::path::PathBuf::new()),
             )
-            .title("GKey Mover — Setup")
+            .title("ClipShelf — Setup")
             .inner_size(520.0, 560.0)
             .min_inner_size(480.0, 480.0)
             .resizable(true)
@@ -635,7 +635,7 @@ pub fn run() {
                 let mut s = app_state.lock().unwrap();
                 let entry = s.logger.log(
                     LogLevel::Info,
-                    "GKey Mover started".to_string(),
+                    "ClipShelf started".to_string(),
                     LogCategory::System,
                 );
                 let _ = app_handle.emit("log-entry", &entry);

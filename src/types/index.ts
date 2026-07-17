@@ -86,7 +86,7 @@ export interface AppConfig {
   small_file_warn_mb: number;
   /** Hotkey to undo the last move/rename. Empty = not registered. */
   undo_bind: string;
-  /** Launch GKey Mover automatically at Windows login. */
+  /** Launch ClipShelf automatically at Windows login. */
   autostart_enabled: boolean;
   /** Restore last window position/size on launch. */
   remember_window_layout: boolean;

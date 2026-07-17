@@ -109,13 +109,13 @@ export function FirstRunApp() {
               <Sparkles className="h-4 w-4 text-t-muted" />
             </h1>
             <p className="text-[11px] text-t-muted">
-              Tell GKey Mover where your clips live.
+              Tell ClipShelf where your clips live.
             </p>
           </div>
         </header>
 
         <p className="text-xs text-t-muted leading-relaxed">
-          GKey Mover watches a folder for new clips from OBS or ShadowPlay. Any
+          ClipShelf watches a folder for new clips from OBS or ShadowPlay. Any
           video that lands there will appear here, ready to sort or rename with
           a hotkey.
         </p>
@@ -157,7 +157,7 @@ export function FirstRunApp() {
         </div>
 
         <div className="space-y-2 pt-2 border-t border-t-border">
-          <Label className="text-xs font-semibold">GKey Mover hotkeys</Label>
+          <Label className="text-xs font-semibold">ClipShelf hotkeys</Label>
           <p className="text-[10px] text-t-muted">
             Defaults shown — tweak later in Settings if they clash.
           </p>
@@ -181,7 +181,7 @@ export function FirstRunApp() {
             />
           </div>
           <p className="text-[10px] text-t-muted">
-            Lets OBS tell GKey Mover the exact saved clip instantly — faster
+            Lets OBS tell ClipShelf the exact saved clip instantly — faster
             and more reliable than folder watching alone. Find the password in
             OBS under Tools → WebSocket Server Settings.
           </p>

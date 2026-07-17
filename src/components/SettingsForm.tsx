@@ -167,7 +167,7 @@ export function SettingsForm({ config, onConfigChange }: SettingsFormProps) {
           <div className="pr-2">
             <Label className="text-xs">Start with Windows</Label>
             <p className="text-[10px] text-t-muted">
-              Launch GKey Mover automatically when you log in.
+              Launch ClipShelf automatically when you log in.
             </p>
           </div>
           <Switch
@@ -721,7 +721,7 @@ export function SettingsForm({ config, onConfigChange }: SettingsFormProps) {
 
       <section className="pt-1 pb-2">
         <p className="text-[11px] text-t-muted text-center">
-          GKey Mover {version ? `v${version}` : ""}
+          ClipShelf {version ? `v${version}` : ""}
         </p>
       </section>
     </div>

@@ -26,7 +26,7 @@ pub const LABEL: &str = "overlay";
 /// `setup` right after the settings/first-run windows are built.
 pub fn init(app: &AppHandle) {
     let window = match WebviewWindowBuilder::new(app, LABEL, WebviewUrl::App(std::path::PathBuf::new()))
-        .title("GKey Mover — Overlay")
+        .title("ClipShelf — Overlay")
         .inner_size(420.0, 480.0)
         .resizable(false)
         .decorations(false)

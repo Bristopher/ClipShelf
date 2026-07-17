@@ -1,4 +1,4 @@
-# build-release.ps1 — one command releases a new GKey Mover version.
+# build-release.ps1 — one command releases a new ClipShelf version.
 # See RELEASING.md. Requires: pnpm, vpk (Velopack CLI), gh (logged in).
 #
 # Usage:
@@ -18,7 +18,7 @@ $ErrorActionPreference = "Stop"
 $ProjectRoot = $PSScriptRoot
 Set-Location $ProjectRoot
 
-$GithubRepo = "Bristopher/GKeyMover"
+$GithubRepo = "Bristopher/ClipShelf"
 
 # ── Guards ────────────────────────────────────────────────────────────────────
 if (-not $LocalOnly) {
@@ -34,7 +34,7 @@ if (-not $LocalOnly) {
     if ($LASTEXITCODE -ne 0) { throw "gh CLI is not logged in - run: gh auth login" }
     git remote get-url origin *> $null
     if ($LASTEXITCODE -ne 0) {
-        throw "No 'origin' remote - create the GitHub repo first: gh repo create GKeyMover --public --source . --push"
+        throw "No 'origin' remote - create the GitHub repo first: gh repo create ClipShelf --public --source . --push"
     }
 }
 
@@ -147,16 +147,16 @@ if (-not $LocalOnly) {
     }
 }
 
-vpk pack --packId com.cbuzi.gkey-mover-v2 --packTitle "GKey Mover" --packVersion $new --packDir "target/release" --mainExe "gkey-mover-v2.exe" --icon "icons/icon.ico" --outputDir "Releases/v$new"
+vpk pack --packId com.cbuzi.gkey-mover-v2 --packTitle "ClipShelf" --packVersion $new --packDir "target/release" --mainExe "gkey-mover-v2.exe" --icon "icons/icon.ico" --outputDir "Releases/v$new"
 if ($LASTEXITCODE -ne 0) { throw "vpk pack failed" }
 
 # ── Step 3: Rename setup + copy portable ──────────────────────────────────────
 $setupSrc = Join-Path $outDir "com.cbuzi.gkey-mover-v2-win-Setup.exe"
-$setupDst = Join-Path $outDir "GKeyMover_${new}_x64-setup.exe"
+$setupDst = Join-Path $outDir "ClipShelf_${new}_x64-setup.exe"
 if (Test-Path $setupSrc) { Rename-Item $setupSrc $setupDst }
 
 $portableSrc = Join-Path $ProjectRoot "src-tauri\target\release\gkey-mover-v2.exe"
-$portableDst = Join-Path $outDir "GKeyMover_${new}_x64-Portable.exe"
+$portableDst = Join-Path $outDir "ClipShelf_${new}_x64-Portable.exe"
 if (Test-Path $portableSrc) { Copy-Item $portableSrc $portableDst }
 
 Set-Location $ProjectRoot
@@ -181,15 +181,15 @@ git push origin main "v$new"
 # releases/latest/download/. Setup + portable ride along for manual installs.
 Write-Host ""
 Write-Host "Step 5 - Publishing GitHub release..." -ForegroundColor Yellow
-if (-not $Notes) { $Notes = "GKey Mover v$new" }
+if (-not $Notes) { $Notes = "ClipShelf v$new" }
 
 $assets = Get-ChildItem $outDir -File | Where-Object {
     $_.Name -in @("releases.win.json", "RELEASES", "assets.win.json") -or
     $_.Name -like "*.nupkg" -or
-    $_.Name -like "GKeyMover_*"
+    $_.Name -like "ClipShelf_*"
 } | ForEach-Object { $_.FullName }
 
-gh release create "v$new" @assets --repo $GithubRepo --title "GKey Mover v$new" --notes $Notes
+gh release create "v$new" @assets --repo $GithubRepo --title "ClipShelf v$new" --notes $Notes
 if ($LASTEXITCODE -ne 0) { throw "gh release create failed" }
 
 Write-Host ""

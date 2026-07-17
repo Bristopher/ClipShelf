@@ -1,4 +1,4 @@
-# Releasing a new GKey Mover version
+# Releasing a new ClipShelf version
 
 The version is decided **at build time** by the release script. It looks at
 the latest released `vX.Y.Z` git tag, suggests the next version, and stamps
@@ -25,10 +25,10 @@ The script:
 4. Builds with `pnpm tauri build`, downloads the previous release from
    GitHub (`vpk download github`) so Velopack can generate a **delta**
    package, then packs with `vpk pack` into `src-tauri\Releases\vX.Y.Z\`
-   (git-ignored) and renames the setup to `GKeyMover_X.Y.Z_x64-setup.exe`
+   (git-ignored) and renames the setup to `ClipShelf_X.Y.Z_x64-setup.exe`
    plus copies the portable exe.
 5. Commits `Release vX.Y.Z`, creates an annotated tag, pushes branch + tag.
-6. Publishes a GitHub release on `Bristopher/GKeyMover` with the Velopack
+6. Publishes a GitHub release on `Bristopher/ClipShelf` with the Velopack
    feed files (`releases.win.json`, `RELEASES`, `*.nupkg`) **under their
    original names** — the in-app updater fetches them through
    `releases/latest/download/` — plus the setup and portable exes for
@@ -43,7 +43,7 @@ version and **asks** the user; nothing updates silently.
 - **Installed builds** (Velopack setup): accepting downloads the
   delta/full package and restarts into the new version.
 - **Portable/dev builds**: Velopack can't self-update those, so accepting
-  opens https://github.com/Bristopher/GKeyMover/releases/latest for a
+  opens https://github.com/Bristopher/ClipShelf/releases/latest for a
   manual download.
 
 The startup check can be disabled in Settings → Updates

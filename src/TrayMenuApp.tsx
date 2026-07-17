@@ -101,14 +101,14 @@ export function TrayMenuApp() {
       <div className="rounded-lg border border-t-border bg-panel shadow-xl overflow-hidden">
         <div className="flex items-center gap-2 px-2.5 pt-2 pb-1.5">
           <img src={logoUrl} alt="" className="h-4 w-4 rounded-sm" />
-          <span className="text-[11px] font-semibold text-t-text">GKey Mover</span>
+          <span className="text-[11px] font-semibold text-t-text">ClipShelf</span>
           {diag && <span className="ml-auto text-[10px] text-t-muted">v{diag.version}</span>}
         </div>
         <div className="h-px bg-t-border mx-1.5" />
         <div className="p-1">
           <MenuItem
             icon={<ExternalLink className="h-3.5 w-3.5" />}
-            label="Open GKey Mover"
+            label="Open ClipShelf"
             onClick={() => run(showMainWindow)}
           />
           <MenuItem
@@ -138,7 +138,7 @@ export function TrayMenuApp() {
           <MenuItem
             icon={<HelpCircle className="h-3.5 w-3.5" />}
             label="Help"
-            onClick={() => run(() => openFolder("https://github.com/Bristopher/GKeyMover"))}
+            onClick={() => run(() => openFolder("https://github.com/Bristopher/ClipShelf"))}
           />
         </div>
         <div className="h-px bg-t-border mx-1.5" />

@@ -149,7 +149,7 @@ pub struct AppConfig {
     pub themes: Vec<Theme>,
 
     /// Keybind the user presses in their capture app (OBS / ShadowPlay) to
-    /// save a clip. Not currently listened to by GKey Mover — informational
+    /// save a clip. Not currently listened to by ClipShelf — informational
     /// for the user, and hooked in future phases to surface "no clip
     /// arrived" errors in the event log.
     #[serde(default = "default_save_clip_bind")]
@@ -192,7 +192,7 @@ pub struct AppConfig {
     #[serde(default = "default_undo_bind")]
     pub undo_bind: String,
 
-    /// Launch GKey Mover automatically at Windows login.
+    /// Launch ClipShelf automatically at Windows login.
     #[serde(default = "default_autostart_enabled")]
     pub autostart_enabled: bool,
 

@@ -17,7 +17,7 @@ use tauri::AppHandle;
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use velopack::{sources::HttpSource, UpdateCheck, UpdateManager};
 
-pub const GITHUB_REPO: &str = "Bristopher/GKeyMover";
+pub const GITHUB_REPO: &str = "Bristopher/ClipShelf";
 
 fn releases_page() -> String {
     format!("https://github.com/{GITHUB_REPO}/releases/latest")
@@ -59,7 +59,7 @@ fn is_newer(remote: &str, current: &str) -> bool {
 fn github_latest_tag() -> Result<String, String> {
     let url = format!("https://api.github.com/repos/{GITHUB_REPO}/releases/latest");
     let resp = ureq::get(&url)
-        .set("User-Agent", "GKeyMover-updater")
+        .set("User-Agent", "ClipShelf-updater")
         .set("Accept", "application/vnd.github+json")
         .timeout(std::time::Duration::from_secs(10))
         .call()
@@ -83,9 +83,9 @@ fn info_dialog(app: &AppHandle, title: &str, message: &str) {
 fn ask_update(app: &AppHandle, remote: &str, action: &str) -> bool {
     app.dialog()
         .message(format!(
-            "GKey Mover {remote} is available (you have v{CURRENT_VERSION}).\n\n{action}"
+            "ClipShelf {remote} is available (you have v{CURRENT_VERSION}).\n\n{action}"
         ))
-        .title("GKey Mover — Update available")
+        .title("ClipShelf — Update available")
         .kind(MessageDialogKind::Info)
         .buttons(MessageDialogButtons::OkCancelCustom(
             "Update now".to_string(),
@@ -124,7 +124,7 @@ fn check_velopack(app: &AppHandle, um: &UpdateManager, quiet: bool) {
                 log::warn!("updater: apply failed: {e}");
                 info_dialog(
                     app,
-                    "GKey Mover — Update failed",
+                    "ClipShelf — Update failed",
                     &format!(
                         "The update could not be installed automatically.\n\n\
                          Opening the releases page so you can download {remote} manually."
@@ -137,7 +137,7 @@ fn check_velopack(app: &AppHandle, um: &UpdateManager, quiet: bool) {
             if !quiet {
                 info_dialog(
                     app,
-                    "GKey Mover — Up to date",
+                    "ClipShelf — Up to date",
                     &format!("You're on the latest version (v{CURRENT_VERSION})."),
                 );
             }
@@ -147,7 +147,7 @@ fn check_velopack(app: &AppHandle, um: &UpdateManager, quiet: bool) {
             if !quiet {
                 info_dialog(
                     app,
-                    "GKey Mover — Update check failed",
+                    "ClipShelf — Update check failed",
                     &format!("Could not reach the update feed.\n\n{e}"),
                 );
             }
@@ -170,7 +170,7 @@ fn check_fallback(app: &AppHandle, quiet: bool) {
             if !quiet {
                 info_dialog(
                     app,
-                    "GKey Mover — Up to date",
+                    "ClipShelf — Up to date",
                     &format!("You're on the latest version (v{CURRENT_VERSION})."),
                 );
             }
@@ -180,7 +180,7 @@ fn check_fallback(app: &AppHandle, quiet: bool) {
             if !quiet {
                 info_dialog(
                     app,
-                    "GKey Mover — Update check failed",
+                    "ClipShelf — Update check failed",
                     &format!("Could not reach GitHub to check for updates.\n\n{e}"),
                 );
             }
