@@ -22,11 +22,20 @@ $GithubRepo = "Bristopher/GKeyMover"
 
 # ── Guards ────────────────────────────────────────────────────────────────────
 if (-not $LocalOnly) {
-    if (git status --porcelain) {
+    # The version-stamped files are exempt: a failed/aborted release leaves
+    # them dirty, and the script itself commits exactly those.
+    $dirty = git status --porcelain | Where-Object {
+        $_ -notmatch 'src-tauri/(tauri\.conf\.json|Cargo\.(toml|lock))$'
+    }
+    if ($dirty) {
         throw "Working tree is not clean - commit or stash your changes first."
     }
     gh auth status *> $null
     if ($LASTEXITCODE -ne 0) { throw "gh CLI is not logged in - run: gh auth login" }
+    git remote get-url origin *> $null
+    if ($LASTEXITCODE -ne 0) {
+        throw "No 'origin' remote - create the GitHub repo first: gh repo create GKeyMover --public --source . --push"
+    }
 }
 
 # ── Detect next version from released git tags (MicGuard-style) ──────────────
@@ -124,12 +133,17 @@ if (Test-Path $outDir) {
 Set-Location (Join-Path $ProjectRoot "src-tauri")
 
 # Download the previously published release from GitHub first so vpk can
-# generate a DELTA package (small download for updaters). Harmless if this
-# is the first release or offline - full packages still work.
+# generate a DELTA package (small download for updaters). Only attempted
+# when a release actually exists - a bare repo would just 404 noisily.
 if (-not $LocalOnly) {
-    vpk download github --repoUrl "https://github.com/$GithubRepo" --outputDir "Releases/v$new"
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "  (no previous GitHub release found - building full package only)" -ForegroundColor DarkGray
+    gh release view --repo $GithubRepo *> $null
+    if ($LASTEXITCODE -eq 0) {
+        vpk download github --repoUrl "https://github.com/$GithubRepo" --outputDir "Releases/v$new"
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "  (delta download failed - building full package only)" -ForegroundColor DarkGray
+        }
+    } else {
+        Write-Host "  (first GitHub release - skipping delta download)" -ForegroundColor DarkGray
     }
 }
 
