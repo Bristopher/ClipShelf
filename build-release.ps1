@@ -37,19 +37,30 @@ if ($confRaw -notmatch '"version":\s*"(\d+)\.(\d+)\.(\d+)"') {
 }
 $current = "$($Matches[1]).$($Matches[2]).$($Matches[3])"
 
-$latestTag = git tag --list 'v*' |
-    Where-Object { $_ -match '^v(\d+)\.(\d+)\.(\d+)$' } |
+# "Released" = any vX.Y.Z git tag, PLUS any src-tauri\Releases\vX.Y.Z folder
+# (pre-GitHub releases were only packaged locally — without this, the first
+# tagged release suggests a version that's already shipped).
+$released = @(
+    git tag --list 'v*' | Where-Object { $_ -match '^v(\d+)\.(\d+)\.(\d+)$' }
+)
+$releasesDir = Join-Path $ProjectRoot "src-tauri\Releases"
+if (Test-Path $releasesDir) {
+    $released += Get-ChildItem $releasesDir -Directory |
+        Where-Object { $_.Name -match '^v(\d+)\.(\d+)\.(\d+)$' } |
+        ForEach-Object { $_.Name }
+}
+$latestReleased = $released |
     ForEach-Object { [version]($_.TrimStart('v')) } |
     Sort-Object | Select-Object -Last 1
 
-if ($latestTag) {
-    Write-Host "Latest released tag:   v$latestTag"
-    # If the manifest is already ahead of the tags (pre-bumped for a local
-    # test build), suggest releasing exactly that; else bump the tag's patch.
-    $suggested = if ([version]$current -gt $latestTag) { $current } else {
-        "$($latestTag.Major).$($latestTag.Minor).$($latestTag.Build + 1)"
+if ($latestReleased) {
+    Write-Host "Latest released:       v$latestReleased"
+    # If the manifest is already ahead of every release (pre-bumped for a
+    # local test build), suggest releasing exactly that; else bump the patch.
+    $suggested = if ([version]$current -gt $latestReleased) { $current } else {
+        "$($latestReleased.Major).$($latestReleased.Minor).$($latestReleased.Build + 1)"
     }
-    $bumpBase = $latestTag
+    $bumpBase = $latestReleased
 } else {
     $suggested = $current
     $bumpBase = [version]$current
