@@ -7,6 +7,7 @@ import type {
   LogEntry,
   OverlayContext,
   Theme,
+  UpdateStatus,
 } from "../types";
 
 export const getConfig = () => invoke<AppConfig>("get_config");
@@ -32,6 +33,9 @@ export const fullQuit = () => invoke<void>("full_quit");
 export const showMainWindow = () => invoke<void>("show_main_window");
 export const hideTrayMenu = () => invoke<void>("hide_tray_menu");
 export const manualUpdateCheck = () => invoke<void>("manual_update_check");
+export const checkUpdateStatus = () => invoke<UpdateStatus>("check_update_status");
+export const installUpdate = () => invoke<void>("install_update");
+export const openReleasesPage = () => invoke<void>("open_releases_page");
 export const undoLastAction = () => invoke<void>("undo_last_action");
 export const revealInExplorer = (path: string) =>
   invoke<void>("reveal_in_explorer", { path });

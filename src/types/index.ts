@@ -112,6 +112,19 @@ export interface AppConfig {
   description_presets: string[];
 }
 
+/** Result of an update check (`check_update_status` / `update-available`). */
+export interface UpdateStatus {
+  status: "update" | "current" | "error";
+  /** Version we're running, no "v" prefix. */
+  current: string;
+  /** Newer version tag ("v2.0.17") when status === "update". */
+  latest?: string;
+  /** True when this build can install in place (Velopack install). */
+  canInstall: boolean;
+  /** Human-readable detail when status === "error". */
+  message?: string;
+}
+
 /** G-key binds + folder names + the overlay toggle bind — mirrors Rust `OverlayBinds`. */
 export interface OverlayBinds {
   g1: string;

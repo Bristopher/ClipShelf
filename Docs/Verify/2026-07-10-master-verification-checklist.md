@@ -1,6 +1,6 @@
 # Master Verification Checklist (2026-07-10)
 
-**Updated:** 2026-07-18 (adds §22 hold-to-click-through; §21 added 07-16)
+**Updated:** 2026-07-18 (reworks §20 popup-free updates + webview-unlock wait; adds §22 hold-to-click-through)
 
 Everything code-verified but not yet exercised live, across three batches:
 the 2026-07-02 QoL batch (undo, pause, clickable log, autostart, window
@@ -438,6 +438,36 @@ pushed and one release published):
       version" dialog (not silence)
 - [ ] `vpk download github` on the second release produced a delta nupkg
       and the update download was small
+
+Reworked 2026-07-18 — popup-free MediaStopper-style UX + grey-window fix:
+ALL native dialogs removed from `updater.rs`. New commands
+`check_update_status` (structured result), `install_update` (one-click
+download+apply+restart; opens releases page on failure), and
+`open_releases_page`. Settings → Updates now renders an inline card
+("Update available — vX [Install vX & relaunch]" / "You're on the latest
+version" / error text). The startup + tray checks write event-log lines and
+emit `update-available`, which the main window shows as a themed consent
+banner (Install & relaunch / Open releases page / dismiss). Tray check also
+brings the main window forward so the result is visible. Separately,
+`main.rs` gained `wait_for_webview_unlock()`: on the Velopack `on_restarted`
+hook (relaunch right after an update) it polls an exclusive open of
+`EBWebView\lockfile` (100ms, 10s cap, zero wait when free) before the UI
+boots — fixes the grey/blank windows hit live on the 2.0.15→2.0.16 update,
+where the old instance's WebView2 helpers still held the user-data folder.
+111 cargo tests. Superseded human items above: dialog wordings → their
+inline/banner equivalents. New human items:
+
+- [ ] Settings → "Check for updates": inline card appears (no popup) with
+      the correct up-to-date / update-available / error state
+- [ ] With an update published: card's "Install vX & relaunch" downloads
+      and restarts into the new version, UI renders (not grey) immediately
+- [ ] Startup check with an update available: banner appears under the
+      titlebar with Install / dismiss; event log gets the update line;
+      no dialog anywhere
+- [ ] Tray → "Check for updates": main window comes forward, result in the
+      event log (and banner if an update exists)
+- [ ] Portable exe: card/banner offer "Open releases page" instead of
+      installing
 
 ## 21. Recording detection (clip vs continuous recording)
 

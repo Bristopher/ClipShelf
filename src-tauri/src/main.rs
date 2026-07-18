@@ -6,7 +6,19 @@ fn main() {
     // uninstall Velopack relaunches the exe with special arguments
     // (--veloapp-*) and this call handles them and exits. On a normal launch
     // it's a no-op.
-    velopack::VelopackApp::build().run();
+    //
+    // on_restarted (fires only on the relaunch right after an update): the
+    // OLD instance's WebView2 helper processes can still be shutting down
+    // at this point, and they hold the EBWebView user-data folder. Booting
+    // the UI while it's locked makes every window come up grey/blank (hit
+    // live on the 2.0.15 → 2.0.16 update). Wait for the folder to actually
+    // be released instead of a fixed sleep — see wait_for_webview_unlock.
+    velopack::VelopackApp::build()
+        .on_restarted(|_| {
+            #[cfg(windows)]
+            wait_for_webview_unlock();
+        })
+        .run();
 
     // Tauri's NSIS template, when invoked by the updater (passive + /R),
     // calls nsis_tauri_utils::RunAsUser from .onInstSuccess to relaunch
@@ -28,6 +40,33 @@ fn main() {
     }
 
     gkey_mover_v2_lib::run()
+}
+
+/// Block until the previous instance's WebView2 helpers release the
+/// EBWebView user-data folder. Chromium holds an exclusive lock on
+/// `EBWebView\lockfile` for the helpers' whole lifetime (verified live), so
+/// an exclusive open succeeding — or the file not existing — means the
+/// folder is free. Zero wait on the fast path, 100ms retries while held,
+/// 10s backstop so a wedged helper can't block startup forever.
+#[cfg(windows)]
+fn wait_for_webview_unlock() {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    let Some(local) = std::env::var_os("LOCALAPPDATA") else {
+        return;
+    };
+    let lock = std::path::Path::new(&local)
+        .join("com.cbuzi.gkey-mover-v2")
+        .join("EBWebView")
+        .join("lockfile");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while std::time::Instant::now() < deadline {
+        match std::fs::OpenOptions::new().read(true).share_mode(0).open(&lock) {
+            Ok(_) => return,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
+            Err(_) => std::thread::sleep(std::time::Duration::from_millis(100)),
+        }
+    }
 }
 
 /// True if our parent process looks like the Tauri NSIS installer for

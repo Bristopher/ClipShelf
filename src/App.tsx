@@ -10,6 +10,8 @@ import {
   openSettingsWindow,
   dropFilesToGkey,
   selectDroppedFile,
+  installUpdate,
+  openReleasesPage,
 } from "@/lib/commands";
 import { errorMessage, toastError, toastInfo, toastSuccess } from "@/lib/toast";
 import { EVENTS } from "@/lib/events";
@@ -26,7 +28,7 @@ import { RenameDialog } from "@/components/RenameDialog";
 import { TitleBar } from "@/components/TitleBar";
 import { Toaster } from "@/components/Toaster";
 import { openFirstRunWindow } from "@/lib/commands";
-import type { AppConfig } from "@/types";
+import type { AppConfig, UpdateStatus } from "@/types";
 
 // Short tone played when user clicks the locked main area while first-run
 // setup is still pending — analogous to the Windows dialog "ding".
@@ -64,6 +66,19 @@ function App() {
   // null; dragActive drives the "drop to rename" hint over the log.
   const [dropKey, setDropKey] = useState<number | null>(null);
   const [dragActive, setDragActive] = useState(false);
+  // Consent banner for the startup/tray update check (no native popups —
+  // the backend emits `update-available` and we ask in-app).
+  const [updateBanner, setUpdateBanner] = useState<UpdateStatus | null>(null);
+  const [updateInstalling, setUpdateInstalling] = useState(false);
+
+  useEffect(() => {
+    const unlisten = listen<UpdateStatus>("update-available", (e) => {
+      setUpdateBanner(e.payload);
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
 
   useEffect(() => {
     getConfig().then(setConfig).catch(console.error);
@@ -260,6 +275,42 @@ function App() {
       onMouseLeave={handleMouseLeave}
     >
       <TitleBar />
+      {updateBanner && (
+        <div className="flex items-center gap-2 px-3 py-1.5 text-xs bg-hover/60 border-b border-t-border shrink-0">
+          <span className="font-semibold">Update {updateBanner.latest} available</span>
+          <span className="text-t-muted">you have v{updateBanner.current}</span>
+          <span className="flex-1" />
+          {updateBanner.canInstall ? (
+            <button
+              className="px-2 py-0.5 rounded bg-accent text-accent-foreground hover:opacity-90 font-medium disabled:opacity-50"
+              disabled={updateInstalling}
+              onClick={() => {
+                setUpdateInstalling(true);
+                installUpdate().catch((e) => {
+                  setUpdateInstalling(false);
+                  toastError(errorMessage(e));
+                });
+              }}
+            >
+              {updateInstalling ? "Installing…" : "Install & relaunch"}
+            </button>
+          ) : (
+            <button
+              className="px-2 py-0.5 rounded bg-accent text-accent-foreground hover:opacity-90 font-medium"
+              onClick={() => openReleasesPage().catch((e) => toastError(errorMessage(e)))}
+            >
+              Open releases page
+            </button>
+          )}
+          <button
+            className="text-t-muted hover:text-t-text px-1"
+            title="Dismiss"
+            onClick={() => setUpdateBanner(null)}
+          >
+            ✕
+          </button>
+        </div>
+      )}
       <div className="flex flex-1 min-h-0 relative">
         <Sidebar config={config} dropKey={dropKey} />
         <main className="flex-1 flex flex-col min-w-0 relative">

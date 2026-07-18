@@ -7,18 +7,129 @@ import { Button } from "@/components/ui/button";
 import { Folder, Music, RotateCcw, X } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getVersion } from "@tauri-apps/api/app";
-import { getMonitorCount, manualUpdateCheck, resetWindow } from "@/lib/commands";
+import {
+  checkUpdateStatus,
+  getMonitorCount,
+  installUpdate,
+  openReleasesPage,
+  resetWindow,
+} from "@/lib/commands";
 import { ThemePanel } from "@/components/ThemePanel";
 import { KeybindInput } from "@/components/KeybindInput";
 import { SaveClipCalibration } from "@/components/SaveClipCalibration";
 import { useObsStatus } from "@/hooks/useObsStatus";
 import { errorMessage, toastError } from "@/lib/toast";
 import { allThemes, resolveFlashTheme } from "@/lib/themes";
-import type { AppConfig } from "@/types";
+import type { AppConfig, UpdateStatus } from "@/types";
 
 interface SettingsFormProps {
   config: AppConfig;
   onConfigChange: (config: AppConfig) => void;
+}
+
+/**
+ * MediaStopper-style inline update flow: "Check for updates" button → result
+ * card in place (no native popups). An available update shows a one-click
+ * "Install vX & relaunch" (Velopack installs) or "Open releases page"
+ * (portable/dev builds).
+ */
+function UpdateChecker() {
+  const [checking, setChecking] = useState(false);
+  const [installing, setInstalling] = useState(false);
+  const [result, setResult] = useState<UpdateStatus | null>(null);
+  const [installError, setInstallError] = useState<string | null>(null);
+
+  const checkNow = async () => {
+    setChecking(true);
+    setResult(null);
+    setInstallError(null);
+    try {
+      setResult(await checkUpdateStatus());
+    } catch (e) {
+      setResult({ status: "error", current: "", canInstall: false, message: errorMessage(e) });
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  const install = async () => {
+    setInstalling(true);
+    setInstallError(null);
+    try {
+      await installUpdate(); // success = the app restarts out from under us
+    } catch (e) {
+      setInstallError(errorMessage(e));
+      setInstalling(false);
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      <Button
+        variant="outline"
+        size="sm"
+        className="h-7 text-xs"
+        disabled={checking || installing}
+        onClick={checkNow}
+      >
+        {checking ? "Checking…" : "Check for updates"}
+      </Button>
+
+      {result?.status === "update" && (
+        <div className="rounded-md border border-t-border bg-hover/40 p-2.5 space-y-2">
+          <p className="text-xs font-semibold">
+            Update available — {result.latest}{" "}
+            <span className="font-normal text-t-muted">
+              (you have v{result.current})
+            </span>
+          </p>
+          {result.canInstall ? (
+            <Button
+              size="sm"
+              className="h-7 text-xs"
+              disabled={installing}
+              onClick={install}
+            >
+              {installing
+                ? "Downloading & installing…"
+                : `Install ${result.latest} & relaunch`}
+            </Button>
+          ) : (
+            <>
+              <p className="text-[10px] text-t-muted">
+                This build can't update itself (portable/dev) — grab the new
+                version from the releases page.
+              </p>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs"
+                onClick={() => openReleasesPage().catch((e) => toastError(errorMessage(e)))}
+              >
+                Open releases page
+              </Button>
+            </>
+          )}
+          {installError && (
+            <p className="text-[10px] text-red-500">
+              Install failed: {installError} — opened the releases page for a
+              manual download.
+            </p>
+          )}
+        </div>
+      )}
+      {result?.status === "current" && (
+        <p className="text-xs text-t-muted">
+          You're on the latest version (v{result.current}).
+        </p>
+      )}
+      {result?.status === "error" && (
+        <p className="text-xs text-red-500">
+          Couldn't check for updates: {result.message}
+        </p>
+      )}
+    </div>
+  );
 }
 
 /** All global-hotkey fields, for duplicate detection. */
@@ -680,14 +791,7 @@ export function SettingsForm({ config, onConfigChange }: SettingsFormProps) {
             onCheckedChange={(v) => update({ check_updates: v })}
           />
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-7 text-xs"
-          onClick={() => manualUpdateCheck().catch((e) => toastError(errorMessage(e)))}
-        >
-          Check for updates now
-        </Button>
+        <UpdateChecker />
       </section>
 
       <Separator />
