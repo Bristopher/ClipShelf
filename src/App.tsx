@@ -277,6 +277,14 @@ function App() {
               onCloseFilter={() => setFilterOpen(false)}
             />
           )}
+          {config.click_through_enabled && (
+            <div className="absolute bottom-11 right-3 z-10 pointer-events-none select-none text-[10px] text-t-muted opacity-45">
+              Hold{" "}
+              {config.click_through_key.charAt(0).toUpperCase() +
+                config.click_through_key.slice(1)}{" "}
+              to click through
+            </div>
+          )}
           {dragActive && dropKey === null && (
             <div className="absolute inset-0 z-30 pointer-events-none flex items-center justify-center bg-black/30 border-2 border-dashed border-t-border rounded-sm m-1">
               <span className="text-xs font-semibold text-t-text bg-panel/90 px-3 py-1.5 rounded border border-t-border shadow">
