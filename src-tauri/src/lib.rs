@@ -1,3 +1,4 @@
+mod clickthrough;
 mod commands;
 mod config;
 mod events;
@@ -114,6 +115,10 @@ pub fn run() {
 
             // Startup update check (consent-based; config-gated).
             updater::spawn_startup_check(app_handle.clone(), config.check_updates);
+
+            // Hold-to-click-through watcher for the main window.
+            clickthrough::configure(config.click_through_enabled, &config.click_through_key);
+            clickthrough::spawn(app_handle.clone());
 
             // Spawn two independent timers:
             //   - `timer_tx`: auto-wipe timer that fires when a new clip

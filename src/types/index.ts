@@ -98,6 +98,10 @@ export interface AppConfig {
   rename_mru: string[];
   game_detection_enabled: boolean;
   check_updates: boolean;
+  /** Hold-to-click-through: clicks pass through the window while the key is held. */
+  click_through_enabled: boolean;
+  /** Which held modifier activates click-through: "ctrl" | "alt" | "shift". */
+  click_through_key: string;
   write_file_properties: boolean;
   day_rollover_hour: number;
   game_overrides: { exe: string; name: string }[];

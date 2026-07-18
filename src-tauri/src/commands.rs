@@ -350,6 +350,9 @@ pub fn update_config(
         .hotkey_controller
         .reload(crate::hotkeys::bindings_from_config(&config));
 
+    // Hot-apply the hold-to-click-through settings.
+    crate::clickthrough::configure(config.click_through_enabled, &config.click_through_key);
+
     // Keep the OS autostart registration in sync with the toggle.
     {
         use tauri_plugin_autostart::ManagerExt;

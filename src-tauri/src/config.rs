@@ -45,6 +45,8 @@ fn default_anchor() -> String { "top-left".to_string() }
 fn default_rename_mru() -> Vec<String> { Vec::new() }
 fn default_game_detection_enabled() -> bool { true }
 fn default_check_updates() -> bool { true }
+fn default_click_through_enabled() -> bool { true }
+fn default_click_through_key() -> String { "ctrl".to_string() }
 fn default_write_file_properties() -> bool { true }
 fn default_day_rollover_hour() -> u8 { 4 }
 fn default_game_overrides() -> Vec<GameOverride> { Vec::new() }
@@ -228,6 +230,19 @@ pub struct AppConfig {
     #[serde(default = "default_check_updates")]
     pub check_updates: bool,
 
+    /// Hold-to-click-through: while `click_through_key` is physically held,
+    /// mouse clicks pass straight through the (semi-transparent) main window
+    /// to whatever is underneath, without minimizing or unfocusing it.
+    #[serde(default = "default_click_through_enabled")]
+    pub click_through_enabled: bool,
+
+    /// Which modifier activates click-through while held: "ctrl", "alt", or
+    /// "shift". NOTE: while held, in-app <mod>+Click actions are unreachable
+    /// (the click never lands on the window) — pick a modifier you don't use
+    /// inside the app.
+    #[serde(default = "default_click_through_key")]
+    pub click_through_key: String,
+
     /// Mirror game/rating/description into Windows file properties
     /// (Explorer Tags/Rating/Comments). history.jsonl is written regardless.
     #[serde(default = "default_write_file_properties")]
@@ -308,6 +323,8 @@ impl Default for AppConfig {
             rename_mru: default_rename_mru(),
             game_detection_enabled: default_game_detection_enabled(),
             check_updates: default_check_updates(),
+            click_through_enabled: default_click_through_enabled(),
+            click_through_key: default_click_through_key(),
             write_file_properties: default_write_file_properties(),
             day_rollover_hour: default_day_rollover_hour(),
             game_overrides: default_game_overrides(),

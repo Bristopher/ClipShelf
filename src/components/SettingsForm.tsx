@@ -165,6 +165,38 @@ export function SettingsForm({ config, onConfigChange }: SettingsFormProps) {
         </div>
         <div className="flex items-center justify-between">
           <div className="pr-2">
+            <Label className="text-xs">Hold-to-click-through</Label>
+            <p className="text-[10px] text-t-muted">
+              While the key below is held, clicks pass through the window to
+              whatever is underneath — no minimizing needed.
+            </p>
+          </div>
+          <Switch
+            checked={config.click_through_enabled}
+            onCheckedChange={(v) => update({ click_through_enabled: v })}
+          />
+        </div>
+        {config.click_through_enabled && (
+          <div className="space-y-1">
+            <Label className="text-xs">Click-through hold key</Label>
+            <select
+              value={config.click_through_key}
+              onChange={(e) => update({ click_through_key: e.target.value })}
+              className="w-full text-xs h-8 px-2 rounded bg-panel border border-t-border"
+            >
+              <option value="ctrl">Ctrl</option>
+              <option value="alt">Alt</option>
+              <option value="shift">Shift</option>
+            </select>
+            <p className="text-[10px] text-t-muted">
+              Heads-up: while held, that key&apos;s +Click actions inside the
+              app can&apos;t be reached (e.g. Ctrl+Click to play a clip) —
+              pick Alt or Shift if you use those.
+            </p>
+          </div>
+        )}
+        <div className="flex items-center justify-between">
+          <div className="pr-2">
             <Label className="text-xs">Start with Windows</Label>
             <p className="text-[10px] text-t-muted">
               Launch ClipShelf automatically when you log in.

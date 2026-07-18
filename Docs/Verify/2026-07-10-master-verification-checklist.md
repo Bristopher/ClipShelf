@@ -1,6 +1,6 @@
 # Master Verification Checklist (2026-07-10)
 
-**Updated:** 2026-07-16 (adds §21 recording detection; §19-20 added 07-15)
+**Updated:** 2026-07-18 (adds §22 hold-to-click-through; §21 added 07-16)
 
 Everything code-verified but not yet exercised live, across three batches:
 the 2026-07-02 QoL batch (undo, pause, clickable log, autostart, window
@@ -475,3 +475,34 @@ manual-verify). Human items:
       unchanged
 - [ ] Delete a recording file while it's being monitored: "Recording
       disappeared before finishing" warning, no crash
+
+## 22. Hold-to-click-through (main window)
+
+Shipped 2026-07-18. New `clickthrough.rs`: a 50ms `GetAsyncKeyState`
+polling thread toggles `WS_EX_TRANSPARENT` on the main window while the
+configured modifier (Settings → Appearance → "Hold-to-click-through",
+default Ctrl, options Ctrl/Alt/Shift, on by default) is physically held —
+clicks pass through to whatever is underneath without unfocusing or
+minimizing anything. Works while the window is unfocused (global key
+state). Title bar shows a "click-through" badge while active
+(`click-through-changed` event). Hot-applies from update_config. Known
+tradeoff (documented in Settings help): while the key is held, that
+modifier's +Click actions inside the app are unreachable — e.g. default
+Ctrl blocks Ctrl+Click-to-play; the user can pick Alt/Shift instead.
+
+**Automated coverage** — 109 cargo tests (new: vk mapping), zero warnings,
+`tsc` + `pnpm build` clean. Human items:
+
+- [ ] With another app focused and ClipShelf floating semi-transparent on
+      top: hold Ctrl and click something under the window — the click lands
+      underneath, ClipShelf stays visible and un-minimized
+- [ ] Release Ctrl: the window is clickable again immediately
+- [ ] "click-through" badge appears in the title bar while held, clears on
+      release
+- [ ] Switch the hold key to Alt in Settings (no restart): Alt activates,
+      Ctrl no longer does, and Ctrl+Click-to-play works again
+- [ ] Toggle the feature off: holding any modifier never makes the window
+      transparent to clicks
+- [ ] Dragging the title bar / G-key buttons work normally while the key is
+      NOT held (no stuck transparent state after alt-tabbing with the key
+      down)

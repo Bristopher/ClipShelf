@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getVersion } from "@tauri-apps/api/app";
-import { Minus, Skull, Square, X } from "lucide-react";
+import { Minus, MousePointerClick, Skull, Square, X } from "lucide-react";
 import { resetWindow, fullQuit } from "@/lib/commands";
 import logoUrl from "@/assets/gkey-logo.png";
 
@@ -17,6 +18,18 @@ export function TitleBar() {
 
   useEffect(() => {
     getVersion().then(setVersion).catch(console.error);
+  }, []);
+
+  // Backend hold-to-click-through state — show a badge while clicks are
+  // falling through the window so it doesn't read as "app stopped working".
+  const [clickThrough, setClickThrough] = useState(false);
+  useEffect(() => {
+    const unlisten = listen<{ active: boolean }>("click-through-changed", (e) => {
+      setClickThrough(e.payload.active);
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
   }, []);
 
   // While the close button is hovered, watch for Ctrl key state. We toggle
@@ -71,10 +84,19 @@ export function TitleBar() {
           onMouseLeave={onLeave}
           className="text-[11px] font-semibold tracking-wide text-t-muted hover:text-t-text transition-colors"
         >
-          GKey Mover
+          ClipShelf
         </span>
         {hovered === "title" && version && (
           <Tooltip align="left-start" text={`v${version}`} />
+        )}
+        {clickThrough && (
+          <span
+            className="flex items-center gap-1 text-[10px] text-t-muted"
+            title="Click-through active — clicks pass through the window"
+          >
+            <MousePointerClick className="h-3 w-3" />
+            click-through
+          </span>
         )}
       </div>
       <div className="flex items-center h-full">
@@ -211,7 +233,7 @@ function CloseTooltip({ ctrlHeld }: { ctrlHeld: boolean }) {
     >
       <div className="relative px-2.5 py-1.5 rounded-md bg-popover text-popover-foreground shadow-lg border border-border whitespace-nowrap animate-in fade-in-0 zoom-in-95 duration-150">
         <p className="text-[11px] font-semibold leading-tight">
-          {ctrlHeld ? "Quit GKey Mover" : "Hide to tray"}
+          {ctrlHeld ? "Quit ClipShelf" : "Hide to tray"}
         </p>
         <p className="text-[9px] text-muted-foreground leading-tight mt-0.5">
           {ctrlHeld
