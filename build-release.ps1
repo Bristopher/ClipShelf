@@ -147,7 +147,19 @@ if (-not $LocalOnly) {
     }
 }
 
-vpk pack --packId com.cbuzi.gkey-mover-v2 --packTitle "ClipShelf" --packVersion $new --packDir "target/release" --mainExe "gkey-mover-v2.exe" --icon "icons/icon.ico" --outputDir "Releases/v$new"
+# Stage ONLY the runtime payload for packing. target/release also contains
+# gigabytes of build intermediates (deps/, incremental/, *.pdb) — packing
+# the whole directory bloated the package ~100x and can fill the disk.
+$stageDir = Join-Path (Get-Location) "target\velopack-stage"
+if (Test-Path $stageDir) { Remove-Item $stageDir -Recurse -Force }
+New-Item -ItemType Directory -Force $stageDir | Out-Null
+Copy-Item "target\release\gkey-mover-v2.exe" $stageDir
+Get-ChildItem "target\release\*.dll" -ErrorAction SilentlyContinue | Copy-Item -Destination $stageDir
+if (Test-Path "target\release\resources") {
+    Copy-Item -Recurse "target\release\resources" (Join-Path $stageDir "resources")
+}
+
+vpk pack --packId com.cbuzi.gkey-mover-v2 --packTitle "ClipShelf" --packVersion $new --packDir "target/velopack-stage" --mainExe "gkey-mover-v2.exe" --icon "icons/icon.ico" --outputDir "Releases/v$new"
 if ($LASTEXITCODE -ne 0) { throw "vpk pack failed" }
 
 # ── Step 3: Rename setup + copy portable ──────────────────────────────────────
