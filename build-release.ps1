@@ -159,7 +159,7 @@ if (Test-Path "target\release\resources") {
     Copy-Item -Recurse "target\release\resources" (Join-Path $stageDir "resources")
 }
 
-vpk pack --packId com.cbuzi.gkey-mover-v2 --packTitle "ClipShelf" --packVersion $new --packDir "target/velopack-stage" --mainExe "gkey-mover-v2.exe" --icon "icons/icon.ico" --outputDir "Releases/v$new"
+vpk pack --packId com.cbuzi.gkey-mover-v2 --packTitle "ClipShelf" --packAuthors "Bristopher" --packVersion $new --packDir "target/velopack-stage" --mainExe "gkey-mover-v2.exe" --icon "icons/icon.ico" --outputDir "Releases/v$new"
 if ($LASTEXITCODE -ne 0) { throw "vpk pack failed" }
 
 # ── Step 3: Rename setup + copy portable ──────────────────────────────────────

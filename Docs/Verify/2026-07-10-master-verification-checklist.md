@@ -490,8 +490,17 @@ tradeoff (documented in Settings help): while the key is held, that
 modifier's +Click actions inside the app are unreachable — e.g. default
 Ctrl blocks Ctrl+Click-to-play; the user can pick Alt/Shift instead.
 
-**Automated coverage** — 109 cargo tests (new: vk mapping), zero warnings,
-`tsc` + `pnpm build` clean. Human items:
+Extended 2026-07-18 (same day): the titlebar close button is carved OUT of
+the click-through region — while the modifier is held, the poll thread
+also does a cursor hit-test against the button's top-right rect
+(40×28 CSS px, DPI-scaled) and drops `WS_EX_TRANSPARENT` only while the
+cursor is over it. The button shows the skull animation (X spins out,
+skull spins in, red) for the entire hold, and clicking it in that state
+fully quits the app — md-viewer-style.
+
+**Automated coverage** — 110 cargo tests (new: vk mapping, close-rect hit
+test incl. 150% DPI), zero warnings, `tsc` + `pnpm build` clean. Human
+items:
 
 - [ ] With another app focused and ClipShelf floating semi-transparent on
       top: hold Ctrl and click something under the window — the click lands
@@ -506,3 +515,11 @@ Ctrl blocks Ctrl+Click-to-play; the user can pick Alt/Shift instead.
 - [ ] Dragging the title bar / G-key buttons work normally while the key is
       NOT held (no stuck transparent state after alt-tabbing with the key
       down)
+- [ ] While holding the modifier, move the cursor over the X button: it
+      shows the skull (red, spin animation) and is hoverable/clickable —
+      clicking it fully quits the app (not hide-to-tray)
+- [ ] While holding the modifier, clicks anywhere EXCEPT the X button still
+      pass through to the app underneath
+- [ ] Same carve-out works at non-100% display scaling (rect is DPI-scaled)
+- [ ] Windows Settings → Apps: a fresh install from the next release shows
+      publisher "Bristopher" instead of the raw com.cbuzi.gkey-mover-v2 ID

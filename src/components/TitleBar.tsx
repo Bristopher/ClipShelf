@@ -128,7 +128,11 @@ export function TitleBar() {
         </BarButton>
         <CloseButton
           active={hovered === "close"}
-          ctrlHeld={ctrlHeld}
+          // During click-through the close button is the one clickable
+          // carve-out (backend drops WS_EX_TRANSPARENT over its rect), so
+          // it shows the skull the whole time the modifier is held — even
+          // when the configured key isn't Ctrl and the game has focus.
+          ctrlHeld={ctrlHeld || clickThrough}
           onEnter={() => {
             // We do NOT use the 350ms delay here so the Ctrl-detection
             // listener arms immediately on hover.
@@ -138,7 +142,7 @@ export function TitleBar() {
           onLeave={onLeave}
           onClick={(e) => {
             onLeave();
-            if (e.ctrlKey) {
+            if (e.ctrlKey || clickThrough) {
               fullQuit().catch(console.error);
             } else {
               appWindow.hide();
