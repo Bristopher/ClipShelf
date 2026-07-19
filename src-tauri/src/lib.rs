@@ -691,6 +691,8 @@ pub fn run() {
             commands::edit_history_game,
             overlay::show_overlay,
             overlay::hide_overlay,
+            overlay::overlay_set_target,
+            overlay::overlay_clear_target,
             overlay::overlay_get_context,
             overlay::overlay_sort,
             overlay::overlay_rate,

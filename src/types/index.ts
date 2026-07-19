@@ -146,6 +146,8 @@ export interface OverlayContext {
   descriptionPresets: string[];
   typingEnabled: boolean;
   binds: OverlayBinds;
+  fromHistory: boolean;
+  targetTime?: string;
 }
 
 export interface RecentClip {

@@ -101,6 +101,12 @@ pub struct AppStateInner {
     /// rename/undo) so the overlay's "set game" can remember a per-exe
     /// detection override for a clip whose game was never auto-detected.
     pub clip_exes: HashMap<PathBuf, String>,
+
+    /// The clip the overlay is explicitly acting on (set via
+    /// `overlay_set_target`, e.g. picking a clip from history), overriding
+    /// the "most recent clip" default. Cleared on overlay hide and whenever
+    /// the target no longer exists on disk.
+    pub overlay_target: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -144,6 +150,7 @@ impl AppStateInner {
             pending_game: None,
             clip_games: HashMap::new(),
             clip_exes: HashMap::new(),
+            overlay_target: None,
         }
     }
 

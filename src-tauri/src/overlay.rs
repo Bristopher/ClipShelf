@@ -147,10 +147,17 @@ fn guard_foreground(prev: isize) {
     });
 }
 
-/// Hide the overlay. Emits `overlay-visible` `{visible: false}` app-wide.
+/// Hide the overlay. Emits `overlay-visible` `{visible: false}` app-wide and
+/// clears any explicit acting target — the next overlay open goes back to
+/// the most recent clip default.
 pub fn hide(app: &AppHandle) {
     if let Some(window) = app.get_webview_window(LABEL) {
         let _ = window.hide();
+    }
+    if let Some(state) = app.try_state::<AppState>() {
+        if let Ok(mut s) = state.lock() {
+            s.overlay_target = None;
+        }
     }
     let _ = app.emit("overlay-visible", serde_json::json!({ "visible": false }));
 }
@@ -242,15 +249,43 @@ pub fn hide_overlay(app: AppHandle, channels: State<'_, ChannelState>) {
 
 // --- Overlay action commands (Task 4) ---
 
-/// The clip every overlay action operates on: the most recent clip's CURRENT
-/// acting path — `moved_path` if it's already been sorted/renamed this
-/// session, else its original `path`. All action commands share this guard so
-/// they fail uniformly with `"No recent clip"` when there's nothing to act on.
-fn acting_clip(s: &AppStateInner) -> Result<PathBuf, String> {
-    match &s.current_file {
-        Some(cf) => Ok(cf.moved_path.as_ref().unwrap_or(&cf.path).clone()),
-        None => Err("No recent clip".to_string()),
+/// Pure decision core for `acting_clip`: given an optional explicit target
+/// (path + whether it still exists on disk) and the current-clip fallback,
+/// decide which path to act on. Returns `(acting, dropped)` — `dropped` is
+/// true when a target was set but has vanished from disk, signaling the
+/// caller to clear `overlay_target` and fall back to `current`.
+fn resolve_acting(
+    target: Option<(PathBuf, bool)>,
+    current: Option<PathBuf>,
+) -> (Option<PathBuf>, bool) {
+    match target {
+        Some((t, true)) => (Some(t), false),
+        Some((_, false)) => (current, true), // vanished → fall back + signal drop
+        None => (current, false),
     }
+}
+
+/// The clip every overlay action operates on: the explicit `overlay_target`
+/// when one is set and still exists on disk, otherwise the most recent
+/// clip's CURRENT acting path — `moved_path` if it's already been
+/// sorted/renamed this session, else its original `path`. All action
+/// commands share this guard so they fail uniformly with `"No recent clip"`
+/// when there's nothing to act on. Takes `&mut` because a vanished target
+/// clears `overlay_target` as a side effect.
+fn acting_clip(s: &mut AppStateInner) -> Result<PathBuf, String> {
+    let target = s.overlay_target.clone().map(|t| {
+        let exists = t.exists();
+        (t, exists)
+    });
+    let current = s
+        .current_file
+        .as_ref()
+        .map(|cf| cf.moved_path.as_ref().unwrap_or(&cf.path).clone());
+    let (acting, dropped) = resolve_acting(target, current);
+    if dropped {
+        s.overlay_target = None;
+    }
+    acting.ok_or_else(|| "No recent clip".to_string())
 }
 
 /// G-key binds + folder names + the overlay toggle bind, so the overlay can
@@ -280,31 +315,32 @@ pub struct OverlayContext {
     pub description_presets: Vec<String>,
     pub typing_enabled: bool,
     pub binds: OverlayBinds,
+    /// True when the overlay is acting on an explicit target (e.g. a clip
+    /// picked from history) rather than the most recent clip.
+    pub from_history: bool,
+    /// The acting clip's most recent history-event time, formatted
+    /// "%I:%M %p" (e.g. "3:42 PM"). `None` when no history event was found
+    /// for it or its timestamp failed to parse.
+    pub target_time: Option<String>,
 }
 
 /// Everything the overlay needs to render, from one short lock. Errors with
 /// `"No recent clip"` when there's nothing to act on.
 #[tauri::command]
 pub fn overlay_get_context(state: State<'_, AppState>) -> Result<OverlayContext, String> {
-    let s = state.lock().map_err(|e| e.to_string())?;
-    let acting = acting_clip(&s)?;
-    let filename = acting
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("unknown")
-        .to_string();
-    let game = s.clip_games.get(&acting).cloned();
-    let exe = s.clip_exes.get(&acting).cloned();
-    let c = &s.config;
-    Ok(OverlayContext {
-        path: acting.to_string_lossy().to_string(),
-        filename,
-        game,
-        exe,
-        label_presets: c.label_presets.clone(),
-        description_presets: c.description_presets.clone(),
-        typing_enabled: c.overlay_typing_enabled,
-        binds: OverlayBinds {
+    let (acting, filename, game, exe, from_history, label_presets, description_presets, typing_enabled, binds, config_path) = {
+        let mut s = state.lock().map_err(|e| e.to_string())?;
+        let acting = acting_clip(&mut s)?;
+        let filename = acting
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown")
+            .to_string();
+        let game = s.clip_games.get(&acting).cloned();
+        let exe = s.clip_exes.get(&acting).cloned();
+        let from_history = s.overlay_target.is_some();
+        let c = &s.config;
+        let binds = OverlayBinds {
             g1: c.g1_bind.clone(),
             g2: c.g2_bind.clone(),
             g3: c.g3_bind.clone(),
@@ -312,8 +348,67 @@ pub fn overlay_get_context(state: State<'_, AppState>) -> Result<OverlayContext,
             g2_name: c.g2_bind_folder_name.clone(),
             g3_name: c.g3_bind_folder_name.clone(),
             overlay: c.overlay_bind.clone(),
-        },
+        };
+        (
+            acting,
+            filename,
+            game,
+            exe,
+            from_history,
+            c.label_presets.clone(),
+            c.description_presets.clone(),
+            c.overlay_typing_enabled,
+            binds,
+            s.config_path.clone(),
+        )
+    };
+
+    // History read happens OUTSIDE the lock.
+    let acting_str = acting.to_string_lossy().to_string();
+    let target_time = crate::history::read_all(&crate::history::history_path(&config_path))
+        .into_iter()
+        .filter(|ev| ev.path == acting_str)
+        .filter_map(|ev| {
+            chrono::DateTime::parse_from_rfc3339(&ev.ts)
+                .ok()
+                .map(|dt| dt.format("%I:%M %p").to_string())
+        })
+        .last();
+
+    Ok(OverlayContext {
+        path: acting.to_string_lossy().to_string(),
+        filename,
+        game,
+        exe,
+        label_presets,
+        description_presets,
+        typing_enabled,
+        binds,
+        from_history,
+        target_time,
     })
+}
+
+/// Set the overlay's explicit acting target — e.g. the user picked a clip
+/// from history. Rejects a target that no longer exists on disk.
+#[tauri::command]
+pub fn overlay_set_target(state: State<'_, AppState>, path: String) -> Result<(), String> {
+    let p = PathBuf::from(&path);
+    if !p.exists() {
+        return Err("Clip no longer exists".into());
+    }
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    s.overlay_target = Some(p);
+    Ok(())
+}
+
+/// Clear the overlay's explicit acting target, returning to the most recent
+/// clip default.
+#[tauri::command]
+pub fn overlay_clear_target(state: State<'_, AppState>) -> Result<(), String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    s.overlay_target = None;
+    Ok(())
 }
 
 /// Sort the current clip with a G-key. Reuses the exact hotkey move path
@@ -342,7 +437,7 @@ pub async fn overlay_rate(
     let stars = stars.clamp(1, 5);
     let (acting, game, write_props, config_path, entry) = {
         let mut s = state.lock().map_err(|e| e.to_string())?;
-        let acting = acting_clip(&s)?;
+        let acting = acting_clip(&mut s)?;
         let game = s.clip_games.get(&acting).cloned();
         let write_props = s.config.write_file_properties;
         let config_path = s.config_path.clone();
@@ -405,8 +500,8 @@ pub async fn overlay_label(
 
 fn do_overlay_label(app: &AppHandle, state: &AppState, label: &str) -> Result<(), String> {
     let (file_path, log_enabled) = {
-        let s = state.lock().map_err(|e| e.to_string())?;
-        (acting_clip(&s)?, s.config.log_file_enabled)
+        let mut s = state.lock().map_err(|e| e.to_string())?;
+        (acting_clip(&mut s)?, s.config.log_file_enabled)
     };
 
     let target = crate::mover::labeled_name(&file_path, label);
@@ -503,7 +598,7 @@ pub async fn overlay_describe(
     }
     let (acting, game, write_props, config_path, entry) = {
         let mut s = state.lock().map_err(|e| e.to_string())?;
-        let acting = acting_clip(&s)?;
+        let acting = acting_clip(&mut s)?;
         let game = s.clip_games.get(&acting).cloned();
         let write_props = s.config.write_file_properties;
         let config_path = s.config_path.clone();
@@ -556,8 +651,8 @@ pub async fn overlay_set_game(
     remember: bool,
 ) -> Result<(), String> {
     let (path, exe) = {
-        let s = state.lock().map_err(|e| e.to_string())?;
-        let acting = acting_clip(&s)?;
+        let mut s = state.lock().map_err(|e| e.to_string())?;
+        let acting = acting_clip(&mut s)?;
         let exe = s.clip_exes.get(&acting).cloned();
         (acting.to_string_lossy().to_string(), exe)
     };
@@ -579,7 +674,7 @@ pub async fn overlay_timer_toggle(channels: State<'_, ChannelState>) -> Result<(
 #[tauri::command]
 pub fn overlay_needs_label(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
-    let acting = acting_clip(&s)?;
+    let acting = acting_clip(&mut s)?;
     let filename = acting
         .file_name()
         .and_then(|n| n.to_str())
@@ -646,6 +741,25 @@ fn write_prop_resolving(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_resolve_acting_prefers_existing_target() {
+        let t = PathBuf::from("C:/clips/old.mp4");
+        let c = PathBuf::from("C:/clips/new.mp4");
+        assert_eq!(resolve_acting(Some((t.clone(), true)), Some(c.clone())), (Some(t), false));
+    }
+    #[test]
+    fn test_resolve_acting_falls_back_and_flags_drop_when_target_gone() {
+        let t = PathBuf::from("C:/clips/gone.mp4");
+        let c = PathBuf::from("C:/clips/new.mp4");
+        assert_eq!(resolve_acting(Some((t, false)), Some(c.clone())), (Some(c), true));
+    }
+    #[test]
+    fn test_resolve_acting_no_target_uses_current() {
+        let c = PathBuf::from("C:/clips/new.mp4");
+        assert_eq!(resolve_acting(None, Some(c.clone())), (Some(c), false));
+        assert_eq!(resolve_acting(None, None), (None, false));
+    }
 
     #[test]
     fn test_with_acting_fallback_identity_wins() {
