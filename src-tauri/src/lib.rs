@@ -694,6 +694,7 @@ pub fn run() {
             overlay::overlay_set_target,
             overlay::overlay_clear_target,
             overlay::overlay_get_context,
+            overlay::overlay_history,
             overlay::overlay_sort,
             overlay::overlay_rate,
             overlay::overlay_label,

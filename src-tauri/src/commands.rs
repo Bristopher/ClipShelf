@@ -462,7 +462,7 @@ pub fn do_press_gkey(app: &AppHandle, state: &AppState, key: u8, source: &str) {
 /// Returns the performed move on success so the CALLER records undo — a
 /// single press pushes one entry, a batch drop groups all its moves into
 /// one entry so one undo press reverses the whole drop.
-fn move_file_with_key(
+pub(crate) fn move_file_with_key(
     app: &AppHandle,
     state: &AppState,
     file_path: &std::path::Path,

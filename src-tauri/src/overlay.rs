@@ -411,17 +411,141 @@ pub fn overlay_clear_target(state: State<'_, AppState>) -> Result<(), String> {
     Ok(())
 }
 
-/// Sort the current clip with a G-key. Reuses the exact hotkey move path
-/// (`do_press_gkey`) — same collision-safe move, log, sound, and undo push —
-/// only tagging the history event source "overlay". Sync like `press_gkey`:
-/// `do_press_gkey` blocks on move retries and Tauri runs it on a worker.
+/// Sort with a G-key. When no explicit target is set (`overlay_target` is
+/// `None`), reuses the exact hotkey move path (`do_press_gkey`) acting on the
+/// most recent clip — same collision-safe move, log, sound, and undo push,
+/// only tagging the history event source "overlay". When a target IS set
+/// (e.g. a clip picked from the overlay's history list), routes that ONE
+/// path through the same move core the drag-drop path uses
+/// (`commands::move_file_with_key`) instead — dropping onto a G-key must be
+/// able to sort a clip other than the most recent one. Sync like
+/// `press_gkey`: both paths block on move retries and Tauri runs sync
+/// commands on a worker thread.
 #[tauri::command]
 pub fn overlay_sort(app: AppHandle, state: State<'_, AppState>, key: u8) -> Result<(), String> {
     if !(1..=3).contains(&key) {
         return Err(format!("Invalid gkey: {}. Must be 1, 2, or 3.", key));
     }
-    crate::commands::do_press_gkey(&app, state.inner(), key, "overlay");
+
+    let target = {
+        let s = state.lock().map_err(|e| e.to_string())?;
+        s.overlay_target.clone()
+    };
+
+    match target {
+        None => {
+            crate::commands::do_press_gkey(&app, state.inner(), key, "overlay");
+        }
+        Some(t) => {
+            let config = {
+                let s = state.lock().map_err(|e| e.to_string())?;
+                s.config.clone()
+            };
+            let label = format!("G{} (overlay)", key);
+            if let Some(mv) =
+                crate::commands::move_file_with_key(&app, state.inner(), &t, key, &label, &config, "overlay")
+            {
+                let mut s = state.lock().map_err(|e| e.to_string())?;
+                s.push_undo(crate::state::UndoEntry { moves: vec![mv] });
+            }
+        }
+    }
     Ok(())
+}
+
+/// One row in the overlay's "today's clips" history list — a subset of
+/// `HistoryEntryPayload` reduced to one row per distinct clip.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OverlayHistoryRow {
+    pub filename: String,
+    pub path: String,
+    pub game: Option<String>,
+    /// The clip's latest event time, formatted "%I:%M %p" (falls back to the
+    /// raw `ts` if it fails to parse).
+    pub time: String,
+    /// Whether the file still exists at `path` — filled by the caller
+    /// (`overlay_history`) since a disk probe would make this fn impure.
+    pub exists: bool,
+}
+
+/// Pure reducer: from the day's reconciled history events, produce one row
+/// per distinct clip (`clip_id`) at the CURRENT logical day, showing each
+/// clip's latest event (so a clip that was created then labeled shows its
+/// labeled path/filename, not its created one). Newest-first by event time,
+/// truncated to `cap`. `exists` is always `false` here — the caller fills it
+/// in with a disk probe so this stays testable without touching the
+/// filesystem.
+fn history_rows(
+    events: &[crate::events::HistoryEntryPayload],
+    today: &str,
+    cap: usize,
+) -> Vec<OverlayHistoryRow> {
+    use std::collections::HashMap;
+
+    // Latest event per clip, among today's events only. `ts` is written by
+    // `chrono::Local::now().to_rfc3339_opts(...)` — a consistent offset
+    // within a session — so plain string comparison sorts chronologically.
+    let mut latest: HashMap<usize, &crate::events::HistoryEntryPayload> = HashMap::new();
+    for e in events.iter().filter(|e| e.day == today) {
+        latest
+            .entry(e.clip_id)
+            .and_modify(|cur| {
+                if e.ts > cur.ts {
+                    *cur = e;
+                }
+            })
+            .or_insert(e);
+    }
+
+    let mut rows: Vec<&crate::events::HistoryEntryPayload> = latest.into_values().collect();
+    rows.sort_by(|a, b| b.ts.cmp(&a.ts));
+
+    rows.into_iter()
+        .take(cap)
+        .map(|e| OverlayHistoryRow {
+            filename: e.filename.clone(),
+            path: e.path.clone(),
+            game: e.game.clone(),
+            time: chrono::DateTime::parse_from_rfc3339(&e.ts)
+                .map(|dt| dt.format("%I:%M %p").to_string())
+                .unwrap_or_else(|_| e.ts.clone()),
+            exists: false,
+        })
+        .collect()
+}
+
+/// Max rows returned by `overlay_history` — a command-center list, not the
+/// full History panel.
+const OVERLAY_HISTORY_CAP: usize = 30;
+
+/// Today's distinct clips for the overlay's history list. Reuses the exact
+/// payload pipeline `get_history` uses (same rollover-bucketed reconciliation
+/// via `commands::history_payloads`), then reduces to one row per clip for
+/// the current logical day.
+#[tauri::command]
+pub async fn overlay_history(state: State<'_, AppState>) -> Result<Vec<OverlayHistoryRow>, String> {
+    let (config_path, rollover_hour) = {
+        let s = state.lock().map_err(|e| e.to_string())?;
+        (s.config_path.clone(), s.config.day_rollover_hour)
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        let events = crate::history::read_all(&crate::history::history_path(&config_path));
+        let today = crate::stats::logical_today(rollover_hour);
+        // full=true: history_payloads must not pre-filter by day — the
+        // reducer needs the WHOLE reconciliation chain (a clip created
+        // yesterday-side of the rollover but labeled today still needs its
+        // earlier events to resolve clip identity) even though only today's
+        // rows are returned.
+        let payloads = crate::commands::history_payloads(events, rollover_hour, true, &today);
+        let mut rows = history_rows(&payloads, &today, OVERLAY_HISTORY_CAP);
+        for row in &mut rows {
+            row.exists = std::path::Path::new(&row.path).exists();
+        }
+        rows
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 /// Rate the current clip 1-5 stars. Appends a `rated` history event and, when
@@ -741,6 +865,101 @@ fn write_prop_resolving(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::events::HistoryEntryPayload;
+
+    fn payload(
+        ts: &str,
+        path: &str,
+        filename: &str,
+        game: Option<&str>,
+        day: &str,
+        clip_id: usize,
+    ) -> HistoryEntryPayload {
+        HistoryEntryPayload {
+            ts: ts.to_string(),
+            event: "moved".to_string(),
+            path: path.to_string(),
+            old_path: None,
+            game: game.map(|g| g.to_string()),
+            exe: None,
+            key: None,
+            rating: None,
+            label: None,
+            description: None,
+            source: "hotkey".to_string(),
+            day: day.to_string(),
+            filename: filename.to_string(),
+            clip_id,
+        }
+    }
+
+    #[test]
+    fn test_overlay_history_rows_dedupe_to_latest_event_per_clip() {
+        // Clip A: created then labeled (new path/filename) — same clip_id.
+        // Clip B: created only. Both events fall on "today".
+        let events = vec![
+            payload(
+                "2026-07-19T10:00:00-04:00",
+                "C:/clips/a.mp4",
+                "a.mp4",
+                Some("Valorant"),
+                "2026-07-19",
+                0,
+            ),
+            payload(
+                "2026-07-19T10:05:00-04:00",
+                "C:/clips/a - clutch.mp4",
+                "a - clutch.mp4",
+                Some("Valorant"),
+                "2026-07-19",
+                0,
+            ),
+            payload(
+                "2026-07-19T10:02:00-04:00",
+                "C:/clips/b.mp4",
+                "b.mp4",
+                Some("Apex"),
+                "2026-07-19",
+                1,
+            ),
+        ];
+
+        let rows = history_rows(&events, "2026-07-19", 30);
+
+        assert_eq!(rows.len(), 2);
+        // Newest first: clip A's labeled event (10:05) before clip B's (10:02).
+        assert_eq!(rows[0].filename, "a - clutch.mp4");
+        assert_eq!(rows[0].path, "C:/clips/a - clutch.mp4");
+        assert_eq!(rows[0].game.as_deref(), Some("Valorant"));
+        assert_eq!(rows[1].filename, "b.mp4");
+    }
+
+    #[test]
+    fn test_overlay_history_rows_filters_to_today_and_caps() {
+        let mut events = vec![payload(
+            "2026-07-18T09:00:00-04:00",
+            "C:/clips/yesterday.mp4",
+            "yesterday.mp4",
+            None,
+            "2026-07-18",
+            0,
+        )];
+        for i in 0..5 {
+            events.push(payload(
+                &format!("2026-07-19T10:0{}:00-04:00", i),
+                &format!("C:/clips/{}.mp4", i),
+                &format!("{}.mp4", i),
+                None,
+                "2026-07-19",
+                i + 1,
+            ));
+        }
+
+        let rows = history_rows(&events, "2026-07-19", 3);
+        assert_eq!(rows.len(), 3);
+        // Newest first among today's clips.
+        assert_eq!(rows[0].filename, "4.mp4");
+    }
 
     #[test]
     fn test_resolve_acting_prefers_existing_target() {

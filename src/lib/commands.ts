@@ -6,6 +6,7 @@ import type {
   HistoryEntry,
   LogEntry,
   OverlayContext,
+  OverlayHistoryRow,
   Theme,
   UpdateStatus,
 } from "../types";
@@ -60,6 +61,7 @@ export const editHistoryGame = (path: string, game: string, exe: string | null, 
 
 // --- Overlay (Task 6) ---
 export const overlayGetContext = () => invoke<OverlayContext>("overlay_get_context");
+export const overlayHistory = () => invoke<OverlayHistoryRow[]>("overlay_history");
 export const overlaySort = (key: number) => invoke<void>("overlay_sort", { key });
 export const overlayRate = (stars: number) => invoke<void>("overlay_rate", { stars });
 export const overlayLabel = (label: string) => invoke<void>("overlay_label", { label });

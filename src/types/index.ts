@@ -150,6 +150,16 @@ export interface OverlayContext {
   targetTime?: string;
 }
 
+/** One row in the overlay's "today's clips" history list — mirrors the Rust
+ * `OverlayHistoryRow` (one row per distinct clip, latest event wins). */
+export interface OverlayHistoryRow {
+  filename: string;
+  path: string;
+  game?: string;
+  time: string;
+  exists: boolean;
+}
+
 export interface RecentClip {
   name: string;
   path: string;
