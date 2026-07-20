@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Settings } from "lucide-react";
 import { emit, listen } from "@tauri-apps/api/event";
 import { Button } from "@/components/ui/button";
+import { Tip } from "@/components/ui/tip";
 import {
   getGkeyStats,
   openSettingsWindow,
@@ -144,18 +145,24 @@ export function Sidebar({ config, dropKey }: SidebarProps) {
                 </p>
                 <div className="mt-1 space-y-0.5">
                   {stat.recent.map((clip) => (
-                    <button
+                    <Tip
                       key={clip.path}
-                      onClick={() =>
-                        revealInExplorer(clip.path).catch((e) =>
-                          toastError(errorMessage(e)),
-                        )
-                      }
-                      title={`Reveal in Explorer\n${clip.path}`}
-                      className="block w-full text-left text-[10px] text-t-muted truncate hover:text-t-text hover:underline underline-offset-2"
+                      text="Reveal in Explorer"
+                      sub={clip.path}
+                      align="left"
+                      wrapperClass="w-full"
                     >
-                      {clip.name}
-                    </button>
+                      <button
+                        onClick={() =>
+                          revealInExplorer(clip.path).catch((e) =>
+                            toastError(errorMessage(e)),
+                          )
+                        }
+                        className="block w-full text-left text-[10px] text-t-muted truncate hover:text-t-text hover:underline underline-offset-2"
+                      >
+                        {clip.name}
+                      </button>
+                    </Tip>
                   ))}
                 </div>
               </div>
@@ -164,16 +171,17 @@ export function Sidebar({ config, dropKey }: SidebarProps) {
         );
       })}
       <div className="flex-1" />
-      <Button
-        variant="ghost"
-        size="icon"
-        className="mx-auto h-7 w-7"
-        title="Settings (Ctrl+,)"
-        aria-label="Open Settings"
-        onClick={() => openSettingsWindow().catch((e) => toastError(errorMessage(e)))}
-      >
-        <Settings className="h-4 w-4" />
-      </Button>
+      <Tip text="Settings (Ctrl+,)" align="left" wrapperClass="mx-auto">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7"
+          aria-label="Open Settings"
+          onClick={() => openSettingsWindow().catch((e) => toastError(errorMessage(e)))}
+        >
+          <Settings className="h-4 w-4" />
+        </Button>
+      </Tip>
     </aside>
   );
 }

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import { Tip } from "@/components/ui/tip";
 import {
   Select,
   SelectContent,
@@ -198,16 +199,17 @@ export function ThemePanel({ config, onConfigChange }: ThemePanelProps) {
               ))}
             </SelectContent>
           </Select>
-          <Button
-            variant="outline"
-            size="icon"
-            className="h-8 w-8 shrink-0"
-            title="Delete theme"
-            disabled={active.builtin || isSystem}
-            onClick={deleteActive}
-          >
-            <Trash2 className="h-4 w-4" />
-          </Button>
+          <Tip text="Delete theme" wrapperClass="shrink-0">
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-8 w-8"
+              disabled={active.builtin || isSystem}
+              onClick={deleteActive}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </Tip>
         </div>
       </div>
 
@@ -272,20 +274,24 @@ export function ThemePanel({ config, onConfigChange }: ThemePanelProps) {
           </div>
 
           <div className="flex flex-wrap gap-2 pt-1">
-            <Button
-              size="sm"
-              className="h-7 text-xs"
-              disabled={!canSaveInPlace}
-              onClick={saveInPlace}
-              title={
+            <Tip
+              text={
                 canSaveInPlace
                   ? "Save changes to this theme"
                   : "Built-in themes can't be overwritten — use Save as new"
               }
+              align="left"
             >
-              <Save className="h-3.5 w-3.5 mr-1" />
-              Save
-            </Button>
+              <Button
+                size="sm"
+                className="h-7 text-xs"
+                disabled={!canSaveInPlace}
+                onClick={saveInPlace}
+              >
+                <Save className="h-3.5 w-3.5 mr-1" />
+                Save
+              </Button>
+            </Tip>
             <Button
               size="sm"
               variant="outline"

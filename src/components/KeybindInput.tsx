@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { X } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { Tip } from "@/components/ui/tip";
 import { cn } from "@/lib/utils";
 
 interface KeybindInputProps {
@@ -84,15 +85,16 @@ export function KeybindInput({
         )}
       />
       {value && !recording && (
-        <button
-          type="button"
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={clear}
-          title="Clear"
-          className="absolute right-1 top-1/2 -translate-y-1/2 p-0.5 rounded text-t-muted hover:text-t-text hover:bg-hover"
-        >
-          <X className="h-3 w-3" />
-        </button>
+        <Tip text="Clear" wrapperClass="absolute right-1 top-1/2 -translate-y-1/2">
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={clear}
+            className="p-0.5 rounded text-t-muted hover:text-t-text hover:bg-hover"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        </Tip>
       )}
     </div>
   );

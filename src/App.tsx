@@ -27,6 +27,7 @@ import { BottomBar } from "@/components/BottomBar";
 import { RenameDialog } from "@/components/RenameDialog";
 import { TitleBar } from "@/components/TitleBar";
 import { Toaster } from "@/components/Toaster";
+import { Tip } from "@/components/ui/tip";
 import { openFirstRunWindow } from "@/lib/commands";
 import type { AppConfig, UpdateStatus } from "@/types";
 
@@ -302,13 +303,14 @@ function App() {
               Open releases page
             </button>
           )}
-          <button
-            className="text-t-muted hover:text-t-text px-1"
-            title="Dismiss"
-            onClick={() => setUpdateBanner(null)}
-          >
-            ✕
-          </button>
+          <Tip text="Dismiss" align="right">
+            <button
+              className="text-t-muted hover:text-t-text px-1"
+              onClick={() => setUpdateBanner(null)}
+            >
+              ✕
+            </button>
+          </Tip>
         </div>
       )}
       <div className="flex flex-1 min-h-0 relative">

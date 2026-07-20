@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import { Tip } from "@/components/ui/tip";
 import {
   Activity,
   History,
@@ -65,10 +66,12 @@ function ObsDot() {
           ? `OBS WebSocket reconnecting (attempt ${obs.attempt})...`
           : "OBS WebSocket disconnected";
   return (
-    <span className="flex items-center gap-1 text-t-muted" title={label}>
-      <span className={`h-1.5 w-1.5 rounded-full ${color}`} />
-      OBS
-    </span>
+    <Tip text={label}>
+      <span className="flex items-center gap-1 text-t-muted">
+        <span className={`h-1.5 w-1.5 rounded-full ${color}`} />
+        OBS
+      </span>
+    </Tip>
   );
 }
 
@@ -120,50 +123,53 @@ export function BottomBar({
       <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={handleWipe}>
         Wipe
       </Button>
-      <Button
-        variant="ghost"
-        size="sm"
-        className={`h-7 text-xs gap-1 ${historyOpen ? "bg-hover text-t-text" : ""}`}
-        title={historyOpen ? "Back to live log" : "Show clip history"}
-        aria-pressed={historyOpen}
-        onClick={onToggleHistory}
-      >
-        <History className="h-3 w-3" />
-        History
-      </Button>
-      <Button
-        variant="ghost"
-        size="sm"
-        className="h-7 text-xs gap-1"
-        onClick={() => undoLastAction().catch((e) => toastError(errorMessage(e)))}
-        title="Undo last move/rename"
-      >
-        <Undo2 className="h-3 w-3" />
-        Undo
-      </Button>
+      <Tip text={historyOpen ? "Back to live log" : "Show clip history"}>
+        <Button
+          variant="ghost"
+          size="sm"
+          className={`h-7 text-xs gap-1 ${historyOpen ? "bg-hover text-t-text" : ""}`}
+          aria-pressed={historyOpen}
+          onClick={onToggleHistory}
+        >
+          <History className="h-3 w-3" />
+          History
+        </Button>
+      </Tip>
+      <Tip text="Undo last move/rename">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 text-xs gap-1"
+          onClick={() => undoLastAction().catch((e) => toastError(errorMessage(e)))}
+        >
+          <Undo2 className="h-3 w-3" />
+          Undo
+        </Button>
+      </Tip>
 
       <Separator orientation="vertical" className="h-4" />
 
-      <Button
-        variant="ghost"
-        size="sm"
-        className={`h-7 text-xs gap-1 ${watchClass}`}
-        // Stopped + resume share a path: setWatchPaused(false) (re)starts
-        // the watcher when a folder is configured.
-        onClick={() =>
-          setWatchPaused(!paused && !stopped).catch((e) => toastError(errorMessage(e)))
-        }
-        title={watchTitle}
-      >
-        {paused ? (
-          <Play className="h-3 w-3" />
-        ) : stopped ? (
-          <TriangleAlert className="h-3 w-3" />
-        ) : (
-          <Pause className="h-3 w-3" />
-        )}
-        {watchLabel}
-      </Button>
+      <Tip text={watchTitle}>
+        <Button
+          variant="ghost"
+          size="sm"
+          className={`h-7 text-xs gap-1 ${watchClass}`}
+          // Stopped + resume share a path: setWatchPaused(false) (re)starts
+          // the watcher when a folder is configured.
+          onClick={() =>
+            setWatchPaused(!paused && !stopped).catch((e) => toastError(errorMessage(e)))
+          }
+        >
+          {paused ? (
+            <Play className="h-3 w-3" />
+          ) : stopped ? (
+            <TriangleAlert className="h-3 w-3" />
+          ) : (
+            <Pause className="h-3 w-3" />
+          )}
+          {watchLabel}
+        </Button>
+      </Tip>
 
       {obsEnabled && (
         <>
@@ -175,24 +181,26 @@ export function BottomBar({
       <Separator orientation="vertical" className="h-4" />
 
       <div className="flex items-center gap-1.5">
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-7 text-xs gap-1"
-          onClick={() => toggleCountUp().catch((e) => toastError(errorMessage(e)))}
-          title="Toggle count-up stopwatch (start ↔ reset)"
-        >
-          <TimerIcon className="h-3 w-3" />
-          {countUp.running ? "Reset" : "Start ↑"}
-        </Button>
-        <span
-          className={`font-mono text-[11px] tabular-nums px-1.5 py-0.5 rounded ${
-            countUp.running ? "text-t-text bg-panel" : "text-t-muted"
-          }`}
-          title="Count-up stopwatch"
-        >
-          {fmt(countUp.elapsedSecs)}
-        </span>
+        <Tip text="Toggle count-up stopwatch (start ↔ reset)">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 text-xs gap-1"
+            onClick={() => toggleCountUp().catch((e) => toastError(errorMessage(e)))}
+          >
+            <TimerIcon className="h-3 w-3" />
+            {countUp.running ? "Reset" : "Start ↑"}
+          </Button>
+        </Tip>
+        <Tip text="Count-up stopwatch">
+          <span
+            className={`font-mono text-[11px] tabular-nums px-1.5 py-0.5 rounded ${
+              countUp.running ? "text-t-text bg-panel" : "text-t-muted"
+            }`}
+          >
+            {fmt(countUp.elapsedSecs)}
+          </span>
+        </Tip>
       </div>
 
       <Separator orientation="vertical" className="h-4" />
@@ -228,21 +236,27 @@ function DiagRow({
   title?: string;
   onClick?: () => void;
 }) {
+  // Split the "Action\npath" title convention into label + dim sub line.
+  const [tipText, tipSub] = title ? (title.split("\n") as [string, string?]) : [null, undefined];
+  const inner = onClick ? (
+    <button
+      onClick={onClick}
+      className="text-[10px] text-t-text truncate hover:underline underline-offset-2 text-left min-w-0 w-full"
+    >
+      {value}
+    </button>
+  ) : (
+    <span className="text-[10px] text-t-text truncate min-w-0">{value}</span>
+  );
   return (
     <div className="flex gap-2 items-baseline">
       <span className="text-[10px] text-t-muted w-20 shrink-0">{label}</span>
-      {onClick ? (
-        <button
-          onClick={onClick}
-          title={title}
-          className="text-[10px] text-t-text truncate hover:underline underline-offset-2 text-left min-w-0"
-        >
-          {value}
-        </button>
+      {tipText ? (
+        <Tip text={tipText} sub={tipSub} align="left" wrapperClass="min-w-0 flex-1">
+          {inner}
+        </Tip>
       ) : (
-        <span className="text-[10px] text-t-text truncate min-w-0" title={title}>
-          {value}
-        </span>
+        inner
       )}
     </div>
   );
@@ -307,16 +321,17 @@ function DiagnosticsButton() {
 
   return (
     <div ref={wrapRef} className="relative">
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-7 w-7"
-        title="Diagnostics"
-        aria-label="Diagnostics"
-        onClick={() => setOpen((v) => !v)}
-      >
-        <Activity className="h-3.5 w-3.5" />
-      </Button>
+      <Tip text="Diagnostics" align="right">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7"
+          aria-label="Diagnostics"
+          onClick={() => setOpen((v) => !v)}
+        >
+          <Activity className="h-3.5 w-3.5" />
+        </Button>
+      </Tip>
       {open && (
         <div className="absolute bottom-full right-0 mb-2 z-50 w-72 rounded-md border border-t-border bg-panel shadow-lg p-3 space-y-2 animate-in fade-in-0 zoom-in-95 duration-150">
           <div className="flex items-center justify-between">

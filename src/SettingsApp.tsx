@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Button } from "@/components/ui/button";
+import { Tip } from "@/components/ui/tip";
 import { getConfig, updateConfig } from "@/lib/commands";
 import { EVENTS } from "@/lib/events";
 import { refreshSystemMode } from "@/lib/systemTheme";
@@ -202,15 +203,16 @@ export function SettingsApp() {
             >
               {dirty ? "Exit without saving" : "Close"}
             </Button>
-            <Button
-              size="sm"
-              onClick={handleSave}
-              disabled={!dirty}
-              className="h-8 text-xs"
-              title="Save (Ctrl+S)"
-            >
-              Save
-            </Button>
+            <Tip text="Save (Ctrl+S)" align="right">
+              <Button
+                size="sm"
+                onClick={handleSave}
+                disabled={!dirty}
+                className="h-8 text-xs"
+              >
+                Save
+              </Button>
+            </Tip>
           </div>
         </div>
       </div>

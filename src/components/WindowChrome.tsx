@@ -1,5 +1,6 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Minus, Square, X } from "lucide-react";
+import { Tip } from "@/components/ui/tip";
 import logoUrl from "@/assets/gkey-logo.png";
 
 const appWindow = getCurrentWindow();
@@ -38,27 +39,30 @@ export function WindowChrome({ title, onCloseRequest }: WindowChromeProps) {
         </span>
       </div>
       <div className="flex items-center h-full">
-        <button
-          onClick={() => appWindow.minimize()}
-          title="Minimize"
-          className="h-full w-11 flex items-center justify-center text-t-muted hover:bg-hover hover:text-t-text transition-colors"
-        >
-          <Minus className="h-3.5 w-3.5" />
-        </button>
-        <button
-          onClick={() => appWindow.toggleMaximize()}
-          title="Maximize"
-          className="h-full w-11 flex items-center justify-center text-t-muted hover:bg-hover hover:text-t-text transition-colors"
-        >
-          <Square className="h-3 w-3" />
-        </button>
-        <button
-          onClick={handleClose}
-          title="Close"
-          className="h-full w-11 flex items-center justify-center text-t-muted hover:bg-red-600 hover:text-white transition-colors"
-        >
-          <X className="h-4 w-4" />
-        </button>
+        <Tip text="Minimize" side="bottom" wrapperClass="h-full">
+          <button
+            onClick={() => appWindow.minimize()}
+            className="h-full w-11 flex items-center justify-center text-t-muted hover:bg-hover hover:text-t-text transition-colors"
+          >
+            <Minus className="h-3.5 w-3.5" />
+          </button>
+        </Tip>
+        <Tip text="Maximize" side="bottom" wrapperClass="h-full">
+          <button
+            onClick={() => appWindow.toggleMaximize()}
+            className="h-full w-11 flex items-center justify-center text-t-muted hover:bg-hover hover:text-t-text transition-colors"
+          >
+            <Square className="h-3 w-3" />
+          </button>
+        </Tip>
+        <Tip text="Close" side="bottom" align="right" wrapperClass="h-full">
+          <button
+            onClick={handleClose}
+            className="h-full w-11 flex items-center justify-center text-t-muted hover:bg-red-600 hover:text-white transition-colors"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </Tip>
       </div>
     </div>
   );

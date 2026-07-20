@@ -4,6 +4,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getVersion } from "@tauri-apps/api/app";
 import { Minus, MousePointerClick, Skull, Square, X } from "lucide-react";
 import { resetWindow, fullQuit } from "@/lib/commands";
+import { Tip } from "@/components/ui/tip";
 import logoUrl from "@/assets/gkey-logo.png";
 
 const appWindow = getCurrentWindow();
@@ -90,13 +91,16 @@ export function TitleBar() {
           <Tooltip align="left-start" text={`v${version}`} />
         )}
         {clickThrough && (
-          <span
-            className="flex items-center gap-1 text-[10px] text-t-muted"
-            title="Click-through active — clicks pass through the window"
+          <Tip
+            text="Click-through active — clicks pass through the window"
+            side="bottom"
+            align="left"
           >
-            <MousePointerClick className="h-3 w-3" />
-            click-through
-          </span>
+            <span className="flex items-center gap-1 text-[10px] text-t-muted">
+              <MousePointerClick className="h-3 w-3" />
+              click-through
+            </span>
+          </Tip>
         )}
       </div>
       <div className="flex items-center h-full">

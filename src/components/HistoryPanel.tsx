@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Tip } from "@/components/ui/tip";
 import { getHistory, editHistoryGame, restoreLog, revealInExplorer } from "@/lib/commands";
 import { EVENTS } from "@/lib/events";
 import { EntryContextMenu, type ContextMenuState } from "@/components/EntryContextMenu";
@@ -312,13 +313,14 @@ export function HistoryView({ onClose, onRestore, dayRolloverHour }: HistoryView
               </button>
             ))}
           </div>
-          <button
-            onClick={onClose}
-            title="Back to live log (Esc)"
-            className="text-[10px] text-t-muted hover:text-t-text px-1.5 py-0.5 rounded border border-t-border"
-          >
-            Back to log
-          </button>
+          <Tip text="Back to live log (Esc)" align="right" side="bottom">
+            <button
+              onClick={onClose}
+              className="text-[10px] text-t-muted hover:text-t-text px-1.5 py-0.5 rounded border border-t-border"
+            >
+              Back to log
+            </button>
+          </Tip>
         </div>
       </div>
 
@@ -350,15 +352,16 @@ export function HistoryView({ onClose, onRestore, dayRolloverHour }: HistoryView
         <p className="text-[10px] text-t-muted">
           Today starts at {dayRolloverHour}:00 (Settings)
         </p>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-6 text-[10px]"
-          title="Restore the wiped log display, then return to the live view"
-          onClick={handleRestore}
-        >
-          Restore log display
-        </Button>
+        <Tip text="Restore the wiped log display, then return to the live view" align="right">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 text-[10px]"
+            onClick={handleRestore}
+          >
+            Restore log display
+          </Button>
+        </Tip>
       </div>
 
       {menu && (

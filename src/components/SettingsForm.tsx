@@ -4,6 +4,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
+import { Tip } from "@/components/ui/tip";
 import { Folder, Music, RotateCcw, X } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getVersion } from "@tauri-apps/api/app";
@@ -542,11 +543,11 @@ export function SettingsForm({ config, onConfigChange }: SettingsFormProps) {
                 placeholder="Default sound"
                 className="text-xs h-8 flex-1"
               />
+              <Tip text="Pick an audio file (wav / mp3 / ogg / flac)" wrapperClass="shrink-0">
               <Button
                 variant="outline"
                 size="icon"
-                className="h-8 w-8 shrink-0"
-                title="Pick an audio file (wav / mp3 / ogg / flac)"
+                className="h-8 w-8"
                 onClick={async () => {
                   try {
                     const selected = await open({
@@ -567,16 +568,18 @@ export function SettingsForm({ config, onConfigChange }: SettingsFormProps) {
               >
                 <Music className="h-4 w-4" />
               </Button>
+              </Tip>
               {config[field] && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 shrink-0"
-                  title="Reset to the default sound"
-                  onClick={() => update({ [field]: null })}
-                >
-                  <X className="h-4 w-4" />
-                </Button>
+                <Tip text="Reset to the default sound" wrapperClass="shrink-0">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={() => update({ [field]: null })}
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </Tip>
               )}
             </div>
           </div>
@@ -924,15 +927,17 @@ function GameOverridesEditor({ config, onConfigChange }: SettingsFormProps) {
                 className="text-xs h-8 flex-1"
                 onChange={(e) => setOverrideName(o.exe, e.target.value)}
               />
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 shrink-0"
-                title="Remove override"
-                onClick={() => removeOverride(o.exe)}
-              >
-                <X className="h-4 w-4" />
-              </Button>
+              <Tip text="Remove override" wrapperClass="shrink-0">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8"
+                  aria-label="Remove override"
+                  onClick={() => removeOverride(o.exe)}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </Tip>
             </div>
           ))}
         </div>
@@ -1001,14 +1006,15 @@ function PresetsEditor({
               className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-full bg-panel border border-t-border text-[11px]"
             >
               {v}
-              <button
-                type="button"
-                onClick={() => remove(v)}
-                title="Remove"
-                className="p-0.5 rounded-full text-t-muted hover:text-t-text hover:bg-hover"
-              >
-                <X className="h-3 w-3" />
-              </button>
+              <Tip text="Remove">
+                <button
+                  type="button"
+                  onClick={() => remove(v)}
+                  className="p-0.5 rounded-full text-t-muted hover:text-t-text hover:bg-hover"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </Tip>
             </span>
           ))}
         </div>

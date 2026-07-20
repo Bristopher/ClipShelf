@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Search, X } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
+import { Tip } from "@/components/ui/tip";
 import { revealInExplorer, openFolder } from "@/lib/commands";
 import { useWatcherStatus } from "@/hooks/useWatcherStatus";
 import { errorMessage, toastError } from "@/lib/toast";
@@ -182,13 +183,14 @@ export function EventLog({ entries, config, filterOpen, onCloseFilter }: EventLo
           <span className="text-[10px] text-t-muted tabular-nums shrink-0">
             {shown.length} / {entries.length}
           </span>
-          <button
-            onClick={onCloseFilter}
-            title="Close filter (Esc)"
-            className="text-t-muted hover:text-t-text"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
+          <Tip text="Close filter (Esc)" align="right">
+            <button
+              onClick={onCloseFilter}
+              className="text-t-muted hover:text-t-text"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </Tip>
         </div>
       )}
       <ScrollArea className="flex-1 px-3 py-2" onScrollCapture={handleScrollCapture}>

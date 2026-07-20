@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Tip } from "@/components/ui/tip";
 import { EVENTS } from "@/lib/events";
 import { renameFile } from "@/lib/commands";
 import { errorMessage, toastError } from "@/lib/toast";
@@ -137,17 +138,17 @@ export function RenameDialog({ mru }: RenameDialogProps) {
         {mru.length > 0 && (
           <div className="flex flex-wrap gap-1">
             {mru.map((t) => (
-              <button
-                key={t}
-                onClick={() => {
-                  setText(t);
-                  inputRef.current?.focus();
-                }}
-                title={`Use "${t}"`}
-                className="px-1.5 py-0.5 rounded border border-border text-[10px] text-muted-foreground hover:text-foreground hover:bg-hover max-w-40 truncate"
-              >
-                {t}
-              </button>
+              <Tip key={t} text={`Use "${t}"`}>
+                <button
+                  onClick={() => {
+                    setText(t);
+                    inputRef.current?.focus();
+                  }}
+                  className="px-1.5 py-0.5 rounded border border-border text-[10px] text-muted-foreground hover:text-foreground hover:bg-hover max-w-40 truncate"
+                >
+                  {t}
+                </button>
+              </Tip>
             ))}
           </div>
         )}
