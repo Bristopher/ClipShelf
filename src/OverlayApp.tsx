@@ -463,7 +463,11 @@ export function OverlayApp() {
       if (m === "app") {
         if (n === 0) setMenu("root");
         else if (n === 1) {
-          const paused = watchPausedRef.current ?? false;
+          // Guard the pre-fetch window: until getDiagnostics resolves we
+          // don't know the real pause state, and guessing can send the
+          // toggle the wrong direction. Ignore the press instead.
+          const paused = watchPausedRef.current;
+          if (paused === null) return;
           runInPlace(async () => {
             await setWatchPaused(!paused);
             watchPausedRef.current = !paused;
@@ -666,7 +670,14 @@ export function OverlayApp() {
                 <>
                   <MenuRow
                     n={1}
-                    label={watchPaused ? "Resume watching" : "Pause watching"}
+                    label={
+                      watchPaused === null
+                        ? "Loading watcher state…"
+                        : watchPaused
+                          ? "Resume watching"
+                          : "Pause watching"
+                    }
+                    disabled={watchPaused === null}
                     onSelect={() => selectDigit(1)}
                   />
                   <MenuRow n={2} label="Open ClipShelf window" onSelect={() => selectDigit(2)} />
