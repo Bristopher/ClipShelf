@@ -260,6 +260,11 @@ export function OverlayApp() {
     setMenu("root");
     setTypingBuffer("");
     bufferRef.current = "";
+    // Every overlay close clears the backend's acting-clip target by design
+    // (overlay.rs hide()). Acknowledge that here so the next reopen's
+    // fetchContext doesn't mistake the routine reset for the targeted clip
+    // vanishing and flash a false "Clip no longer exists" warning.
+    wasTargetedRef.current = false;
     flashRef.current = null;
     setFlash(null);
     if (flashTimer.current) {
@@ -351,7 +356,16 @@ export function OverlayApp() {
         showFlash("error", errorMessage(e));
         flashOnly(1500);
         overlayHistory()
-          .then(setHistoryRows)
+          .then((rows) => {
+            // Re-clamp selection/offset against the refreshed (possibly
+            // shorter) list, or the visible slice can render empty until an
+            // arrow press forces a recompute.
+            const sel = Math.max(0, Math.min(historySelRef.current, rows.length - 1));
+            const { offset } = overlayViewport(rows.length, sel, historyOffRef.current);
+            setHistoryRows(rows);
+            setHistorySel(sel);
+            setHistoryOff(offset);
+          })
           .catch(() => {});
       }
     },
