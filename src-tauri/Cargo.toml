@@ -1,6 +1,6 @@
 [package]
 name = "gkey-mover-v2"
-version = "2.0.17"
+version = "2.0.18"
 description = "ClipShelf - Sort/rename OBS clips via G-key hotkeys"
 authors = ["cbuzi"]
 edition = "2021"
