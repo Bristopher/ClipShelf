@@ -32,6 +32,8 @@ export const cancelCalibration = () => invoke<void>("cancel_calibration");
 export const toggleCountUp = () => invoke<void>("toggle_count_up");
 export const fullQuit = () => invoke<void>("full_quit");
 export const showMainWindow = () => invoke<void>("show_main_window");
+export const showMainWindowNoactivate = () => invoke<void>("show_main_window_noactivate");
+export const hideMainWindow = () => invoke<void>("hide_main_window");
 export const hideTrayMenu = () => invoke<void>("hide_tray_menu");
 export const manualUpdateCheck = () => invoke<void>("manual_update_check");
 export const checkUpdateStatus = () => invoke<UpdateStatus>("check_update_status");
@@ -69,6 +71,7 @@ export const overlayDescribe = (text: string) => invoke<void>("overlay_describe"
 export const overlaySetGame = (game: string, remember: boolean) =>
   invoke<void>("overlay_set_game", { game, remember });
 export const overlayTimerToggle = () => invoke<void>("overlay_timer_toggle");
+export const overlayTimerReset = () => invoke<void>("overlay_timer_reset");
 export const overlayNeedsLabel = () => invoke<void>("overlay_needs_label");
 export const startTypeMode = () => invoke<void>("start_type_mode");
 export const stopTypeMode = () => invoke<void>("stop_type_mode");

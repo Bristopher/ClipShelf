@@ -9,6 +9,10 @@ pub enum CountUpCommand {
     /// Single-key toggle: if running, reset to 0 and stop; if stopped,
     /// start counting up from 0.
     Toggle,
+    /// Force-stop and zero the stopwatch regardless of current state
+    /// (overlay "reset" control — distinct from Toggle, which only resets
+    /// when it was already running).
+    Reset,
 }
 
 pub enum TimerCommand {
@@ -116,6 +120,14 @@ pub fn spawn_count_up_timer(
                                 elapsed = 0;
                                 running = true;
                             }
+                            let _ = app_handle.emit(tick_event, CountUpTickPayload {
+                                elapsed_secs: elapsed,
+                                running,
+                            });
+                        }
+                        Some(CountUpCommand::Reset) => {
+                            running = false;
+                            elapsed = 0;
                             let _ = app_handle.emit(tick_event, CountUpTickPayload {
                                 elapsed_secs: elapsed,
                                 running,

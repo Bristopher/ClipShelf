@@ -807,6 +807,15 @@ pub async fn overlay_timer_toggle(channels: State<'_, ChannelState>) -> Result<(
         .map_err(|e| format!("Failed to send count-up toggle: {}", e))
 }
 
+/// Force-stop and zero the count-up stopwatch, regardless of current state.
+#[tauri::command]
+pub async fn overlay_timer_reset(channels: State<'_, ChannelState>) -> Result<(), String> {
+    let tx = channels.count_up_tx.clone();
+    tx.send(CountUpCommand::Reset)
+        .await
+        .map_err(|e| format!("Failed to send count-up reset: {}", e))
+}
+
 /// The user picked "custom label" while typing is disabled — surface a visible
 /// reminder in the event log so they know to enable typing or pick a preset.
 /// No history vocabulary; purely a log nudge.

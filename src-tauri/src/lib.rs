@@ -420,8 +420,9 @@ pub fn run() {
                             HotkeyAction::OverlayKey(10) => {
                                 overlay::close(&app_handle, &controller);
                             }
-                            // Digit selections (1-9, 0) are handed to the
-                            // overlay webview to interpret.
+                            // Digit selections (1-9, 0) and arrow navigation
+                            // (11 = up, 12 = down) are handed to the overlay
+                            // webview to interpret.
                             HotkeyAction::OverlayKey(n) => {
                                 let _ = app_handle.emit("overlay-key", n);
                             }
@@ -671,6 +672,8 @@ pub fn run() {
             commands::toggle_count_up,
             commands::full_quit,
             commands::show_main_window,
+            commands::show_main_window_noactivate,
+            commands::hide_main_window,
             commands::hide_tray_menu,
             updater::manual_update_check,
             updater::check_update_status,
@@ -701,6 +704,7 @@ pub fn run() {
             overlay::overlay_describe,
             overlay::overlay_set_game,
             overlay::overlay_timer_toggle,
+            overlay::overlay_timer_reset,
             overlay::overlay_needs_label,
             keyhook::start_type_mode,
             keyhook::stop_type_mode,

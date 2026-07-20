@@ -1142,6 +1142,44 @@ pub fn show_main_window(app: AppHandle) {
     }
 }
 
+/// Show the main window without stealing focus from whatever the user has
+/// active (e.g. a game). Used by the overlay's "open ClipShelf" action —
+/// unlike `show_main_window` (tray "Open"), this must NOT activate: Tauri's
+/// `unminimize()`/`set_focus()` both activate the window, which would yank
+/// focus off a fullscreen/exclusive game. `SW_SHOWNOACTIVATE` shows AND
+/// restores a minimized window in one call without activating it.
+#[tauri::command]
+pub fn show_main_window_noactivate(app: AppHandle) {
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+
+    #[cfg(target_os = "windows")]
+    {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOWNOACTIVATE};
+
+        if let Ok(hwnd) = window.hwnd() {
+            unsafe {
+                ShowWindow(hwnd.0, SW_SHOWNOACTIVATE);
+            }
+            return;
+        }
+    }
+
+    // Non-Windows / HWND-lookup-failure fallback: best effort, may activate.
+    let _ = window.show();
+}
+
+/// Hide the main window. The overlay webview is a separate window/renderer
+/// from "main", so it can't call `window.hide()` on itself to hide main —
+/// this command lets the overlay's App submenu hide it.
+#[tauri::command]
+pub fn hide_main_window(app: AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.hide();
+    }
+}
+
 #[tauri::command]
 pub fn hide_tray_menu(app: AppHandle) {
     if let Some(window) = app.get_webview_window(crate::tray::MENU_LABEL) {

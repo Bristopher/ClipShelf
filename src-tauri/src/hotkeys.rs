@@ -83,8 +83,9 @@ fn compose(inner: &ControllerInner) -> Vec<(HotkeyAction, String)> {
 }
 
 /// The temporary keys registered while the overlay is open: bare digits
-/// "1".."9" → `OverlayKey(1..=9)`, "0" → `OverlayKey(0)`, and "escape" →
-/// `OverlayKey(10)` (the Esc sentinel that closes the overlay). Bare keys
+/// "1".."9" → `OverlayKey(1..=9)`, "0" → `OverlayKey(0)`, "escape" →
+/// `OverlayKey(10)` (the Esc sentinel that closes the overlay), and "up"/
+/// "down" → `OverlayKey(11)`/`OverlayKey(12)` (list navigation). Bare keys
 /// (no modifier) — they only exist while the overlay panel is up.
 pub fn overlay_temp_bindings() -> Vec<(HotkeyAction, String)> {
     let mut v: Vec<(HotkeyAction, String)> = (1u8..=9)
@@ -92,6 +93,8 @@ pub fn overlay_temp_bindings() -> Vec<(HotkeyAction, String)> {
         .collect();
     v.push((HotkeyAction::OverlayKey(0), "0".to_string()));
     v.push((HotkeyAction::OverlayKey(10), "escape".to_string()));
+    v.push((HotkeyAction::OverlayKey(11), "up".to_string()));
+    v.push((HotkeyAction::OverlayKey(12), "down".to_string()));
     v
 }
 
@@ -114,8 +117,9 @@ pub enum HotkeyAction {
     /// Show/hide the in-game overlay. User-configured global bind.
     OverlayToggle,
     /// A key pressed while the overlay is open. `1..=9` and `0` are the digit
-    /// selections; `10` is the Esc sentinel (closes the overlay). These are
-    /// registered as bare temporary hotkeys only while the overlay is up.
+    /// selections; `10` is the Esc sentinel (closes the overlay); `11`/`12`
+    /// are Up/Down (list navigation). These are registered as bare temporary
+    /// hotkeys only while the overlay is up.
     OverlayKey(u8),
 }
 
@@ -242,9 +246,9 @@ pub fn key_name_to_vk(name: &str) -> Result<u32, String> {
         "pageup" => Ok(0x21),
         "pagedown" => Ok(0x22),
         "arrowleft" => Ok(0x25),
-        "arrowup" => Ok(0x26),
+        "arrowup" | "up" => Ok(0x26),
         "arrowright" => Ok(0x27),
-        "arrowdown" => Ok(0x28),
+        "arrowdown" | "down" => Ok(0x28),
         "`" => Ok(0xC0),
         "-" => Ok(0xBD),
         "=" => Ok(0xBB),
@@ -529,6 +533,16 @@ mod tests {
     }
 
     #[test]
+    fn test_key_name_to_vk_up_down() {
+        // Overlay arrow-key temp binds use the bare "up"/"down" names (not
+        // the DOM "arrowup"/"arrowdown" strings, which are also supported).
+        assert_eq!(key_name_to_vk("up").unwrap(), 0x26);
+        assert_eq!(key_name_to_vk("arrowup").unwrap(), 0x26);
+        assert_eq!(key_name_to_vk("down").unwrap(), 0x28);
+        assert_eq!(key_name_to_vk("arrowdown").unwrap(), 0x28);
+    }
+
+    #[test]
     fn test_parse_hotkey_bare_key() {
         // Overlay temp keys are modifier-less; parse must accept them.
         let d = parse_hotkey("1").unwrap();
@@ -542,12 +556,14 @@ mod tests {
     #[test]
     fn test_overlay_temp_bindings_shape() {
         let b = overlay_temp_bindings();
-        // 1-9, 0, escape = 11 entries.
-        assert_eq!(b.len(), 11);
+        // 1-9, 0, escape, up, down = 13 entries.
+        assert_eq!(b.len(), 13);
         assert_eq!(b[0], (HotkeyAction::OverlayKey(1), "1".to_string()));
         assert_eq!(b[8], (HotkeyAction::OverlayKey(9), "9".to_string()));
         assert_eq!(b[9], (HotkeyAction::OverlayKey(0), "0".to_string()));
         assert_eq!(b[10], (HotkeyAction::OverlayKey(10), "escape".to_string()));
+        assert_eq!(b[11], (HotkeyAction::OverlayKey(11), "up".to_string()));
+        assert_eq!(b[12], (HotkeyAction::OverlayKey(12), "down".to_string()));
         // Every temp binding must parse (else it can never register).
         for (_, s) in &b {
             assert!(parse_hotkey(s).is_ok(), "temp bind '{}' must parse", s);
