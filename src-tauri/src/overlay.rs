@@ -447,6 +447,11 @@ pub fn overlay_sort(app: AppHandle, state: State<'_, AppState>, key: u8) -> Resu
             {
                 let mut s = state.lock().map_err(|e| e.to_string())?;
                 s.push_undo(crate::state::UndoEntry { moves: vec![mv] });
+                // Clear the explicit target now that it's been acted on — a
+                // fast double-press must re-resolve (fall back to the most
+                // recent clip), not re-enter with this stale, already-moved
+                // path and flash a false success.
+                s.overlay_target = None;
             }
         }
     }
@@ -491,7 +496,12 @@ fn history_rows(
         latest
             .entry(e.clip_id)
             .and_modify(|cur| {
-                if e.ts > cur.ts {
+                // `>=` (not `>`): ts is second-precision, so same-clip events
+                // within one second are common (e.g. created then labeled in
+                // the same second). Iterating oldest-first, `>=` lets the
+                // later-in-file event win the tie, matching "latest event's
+                // path/filename" even when timestamps are identical.
+                if e.ts >= cur.ts {
                     *cur = e;
                 }
             })
@@ -499,7 +509,11 @@ fn history_rows(
     }
 
     let mut rows: Vec<&crate::events::HistoryEntryPayload> = latest.into_values().collect();
-    rows.sort_by(|a, b| b.ts.cmp(&a.ts));
+    // Secondary key (clip_id descending) makes cross-clip ordering
+    // deterministic when two different clips' latest events land in the same
+    // second — otherwise HashMap iteration order would make row order
+    // nondeterministic between runs.
+    rows.sort_by(|a, b| b.ts.cmp(&a.ts).then(b.clip_id.cmp(&a.clip_id)));
 
     rows.into_iter()
         .take(cap)
@@ -532,12 +546,13 @@ pub async fn overlay_history(state: State<'_, AppState>) -> Result<Vec<OverlayHi
     tauri::async_runtime::spawn_blocking(move || {
         let events = crate::history::read_all(&crate::history::history_path(&config_path));
         let today = crate::stats::logical_today(rollover_hour);
-        // full=true: history_payloads must not pre-filter by day — the
-        // reducer needs the WHOLE reconciliation chain (a clip created
-        // yesterday-side of the rollover but labeled today still needs its
-        // earlier events to resolve clip identity) even though only today's
-        // rows are returned.
-        let payloads = crate::commands::history_payloads(events, rollover_hour, true, &today);
+        // full=false: history_payloads' identity reconciliation (the
+        // original_game/edited_game chain) always walks the WHOLE event log
+        // before the full/day filter is applied, so identity correctness
+        // doesn't depend on this flag. `full` only controls which payloads
+        // are emitted, and history_rows discards non-today rows anyway, so
+        // pass false to skip formatting payloads this reducer would throw away.
+        let payloads = crate::commands::history_payloads(events, rollover_hour, false, &today);
         let mut rows = history_rows(&payloads, &today, OVERLAY_HISTORY_CAP);
         for row in &mut rows {
             row.exists = std::path::Path::new(&row.path).exists();
@@ -932,6 +947,38 @@ mod tests {
         assert_eq!(rows[0].path, "C:/clips/a - clutch.mp4");
         assert_eq!(rows[0].game.as_deref(), Some("Valorant"));
         assert_eq!(rows[1].filename, "b.mp4");
+    }
+
+    #[test]
+    fn test_overlay_history_rows_same_second_tie_break_prefers_later_in_file() {
+        // Clip created then labeled within the SAME second (ts identical) —
+        // second-precision timestamps make this common. The labeled event
+        // (later in the file, oldest-first) must win the dedupe, not the
+        // created event that happens to compare equal.
+        let events = vec![
+            payload(
+                "2026-07-19T10:00:00-04:00",
+                "C:/clips/a.mp4",
+                "a.mp4",
+                Some("Valorant"),
+                "2026-07-19",
+                0,
+            ),
+            payload(
+                "2026-07-19T10:00:00-04:00",
+                "C:/clips/a - clutch.mp4",
+                "a - clutch.mp4",
+                Some("Valorant"),
+                "2026-07-19",
+                0,
+            ),
+        ];
+
+        let rows = history_rows(&events, "2026-07-19", 30);
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].filename, "a - clutch.mp4");
+        assert_eq!(rows[0].path, "C:/clips/a - clutch.mp4");
     }
 
     #[test]
