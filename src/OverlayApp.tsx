@@ -4,12 +4,15 @@ import {
   getDiagnostics,
   hideMainWindow,
   hideOverlay,
+  overlayClearTarget,
   overlayDescribe,
   overlayGetContext,
+  overlayHistory,
   overlayLabel,
   overlayNeedsLabel,
   overlayRate,
   overlaySetGame,
+  overlaySetTarget,
   overlaySort,
   overlayTimerReset,
   overlayTimerToggle,
@@ -21,8 +24,9 @@ import {
   wipeLog,
 } from "@/lib/commands";
 import { EVENTS } from "@/lib/events";
+import { overlayViewport } from "@/lib/overlayViewport";
 import { errorMessage } from "@/lib/toast";
-import type { CountUpTick, OverlayContext } from "@/types";
+import type { CountUpTick, OverlayContext, OverlayHistoryRow } from "@/types";
 
 /** Target a "custom text" entry commits to once the user finishes typing. */
 type TypingTarget = "label" | "describe" | "game";
@@ -71,12 +75,14 @@ function MenuRow({
   label,
   hint,
   disabled,
+  selected,
   onSelect,
 }: {
   n: number | string;
   label: React.ReactNode;
   hint?: string;
   disabled?: boolean;
+  selected?: boolean;
   onSelect: () => void;
 }) {
   return (
@@ -87,9 +93,12 @@ function MenuRow({
         e.preventDefault();
         if (!disabled) onSelect();
       }}
-      className="w-full flex items-center justify-between gap-3 px-3 py-2 rounded-lg text-left
-        bg-white/5 hover:bg-white/15 disabled:opacity-40 disabled:hover:bg-white/5
-        border border-white/10 transition-colors"
+      className={`w-full flex items-center justify-between gap-3 px-3 py-2 rounded-lg text-left
+        disabled:opacity-40 disabled:hover:bg-white/5 border transition-colors ${
+          selected
+            ? "bg-white/15 border-white/25 hover:bg-white/20"
+            : "bg-white/5 hover:bg-white/15 border-white/10"
+        }`}
     >
       <span className="flex items-center gap-2.5 min-w-0">
         <span className="shrink-0 inline-flex items-center justify-center h-6 w-6 rounded bg-white/10 text-[13px] font-bold font-mono">
@@ -154,6 +163,28 @@ export function OverlayApp() {
   useEffect(() => {
     countUpRef.current = countUp;
   }, [countUp]);
+
+  // History rolodex state ("Today's clips") — rows/sel/off mirrored into refs
+  // for the overlay-key listener, same pattern as the other menus.
+  const [historyRows, setHistoryRows] = useState<OverlayHistoryRow[]>([]);
+  const [historySel, setHistorySel] = useState(0);
+  const [historyOff, setHistoryOff] = useState(0);
+  const historyRowsRef = useRef<OverlayHistoryRow[]>([]);
+  const historySelRef = useRef(0);
+  const historyOffRef = useRef(0);
+  useEffect(() => {
+    historyRowsRef.current = historyRows;
+  }, [historyRows]);
+  useEffect(() => {
+    historySelRef.current = historySel;
+  }, [historySel]);
+  useEffect(() => {
+    historyOffRef.current = historyOff;
+  }, [historyOff]);
+  // Tracks whether the backend's acting-clip target was set as of the last
+  // fetchContext() — lets fetchContext detect the target vanishing out from
+  // under us (fromHistory flips true -> false without us clearing it).
+  const wasTargetedRef = useRef(false);
   useEffect(() => {
     const un = listen<CountUpTick>(EVENTS.COUNT_UP_TICK, (e) => {
       setCountUp(e.payload);
@@ -202,6 +233,21 @@ export function OverlayApp() {
   const fetchContext = useCallback(async () => {
     try {
       const c = await overlayGetContext();
+      // Flag the target vanishing out from under us — the backend dropped
+      // fromHistory without an explicit overlayClearTarget() call from here
+      // (e.g. the targeted clip's file was deleted). Deliberate clears set
+      // wasTargetedRef to false themselves before calling fetchContext, so
+      // this only fires for the unexpected case.
+      if (wasTargetedRef.current && !c.fromHistory) {
+        flashRef.current = { kind: "warn", text: "Clip no longer exists — back to latest" };
+        setFlash(flashRef.current);
+        if (flashTimer.current) window.clearTimeout(flashTimer.current);
+        flashTimer.current = window.setTimeout(() => {
+          flashRef.current = null;
+          setFlash(null);
+        }, 1500);
+      }
+      wasTargetedRef.current = c.fromHistory;
       setCtx(c);
       setLoadError(null);
     } catch (e) {
@@ -289,6 +335,45 @@ export function OverlayApp() {
     },
     [showFlash, flashOnly],
   );
+
+  // Sets the backend's acting-clip target to a history row and returns to
+  // root. On failure, stays in the history menu and refetches the list —
+  // the failure (e.g. the file vanished between fetch and pick) means the
+  // row's `exists` flag is stale.
+  const pickHistoryRow = useCallback(
+    async (row: OverlayHistoryRow) => {
+      if (flashRef.current) return;
+      try {
+        await overlaySetTarget(row.path);
+        await fetchContext();
+        setMenu("root");
+      } catch (e) {
+        showFlash("error", errorMessage(e));
+        flashOnly(1500);
+        overlayHistory()
+          .then(setHistoryRows)
+          .catch(() => {});
+      }
+    },
+    [fetchContext, showFlash, flashOnly],
+  );
+
+  // Clears the backend's acting-clip target, reverting to the latest clip.
+  // Marks wasTargetedRef false first so fetchContext doesn't mistake this
+  // deliberate clear for the target vanishing out from under us.
+  const backToLatest = useCallback(async () => {
+    if (flashRef.current) return;
+    wasTargetedRef.current = false;
+    try {
+      await overlayClearTarget();
+      await fetchContext();
+      showFlash("success", "Back to latest clip");
+      flashOnly(900);
+    } catch (e) {
+      showFlash("error", errorMessage(e));
+      flashOnly(1500);
+    }
+  }, [fetchContext, showFlash, flashOnly]);
 
   const needsTypingFallback = useCallback(async () => {
     try {
@@ -379,6 +464,24 @@ export function OverlayApp() {
       if (typeof m === "object") return; // typing mode ignores digits
       if (flashRef.current) return; // action pending/flashing — no re-fire
 
+      // Arrow-key nav (11 = Up, 12 = Down) only does anything in the history
+      // rolodex — every other menu is flat and has no scrollable selection.
+      if (n === 11 || n === 12) {
+        if (m !== "history") return;
+        const rows = historyRowsRef.current;
+        if (rows.length === 0) return;
+        const sel =
+          n === 11
+            ? Math.max(0, historySelRef.current - 1)
+            : Math.min(rows.length - 1, historySelRef.current + 1);
+        const vp = overlayViewport(rows.length, sel, historyOffRef.current);
+        historySelRef.current = sel;
+        historyOffRef.current = vp.offset;
+        setHistorySel(sel);
+        setHistoryOff(vp.offset);
+        return;
+      }
+
       if (m === "root") {
         if (n === 1) setMenu("sort");
         else if (n === 2) setMenu("rate");
@@ -386,8 +489,16 @@ export function OverlayApp() {
         else if (n === 4) setMenu("describe");
         else if (n === 5) setMenu("game");
         else if (n === 6) setMenu("timer");
-        else if (n === 7) setMenu("history");
-        else if (n === 8) {
+        else if (n === 7) {
+          setMenu("history");
+          historySelRef.current = 0;
+          historyOffRef.current = 0;
+          setHistorySel(0);
+          setHistoryOff(0);
+          overlayHistory()
+            .then(setHistoryRows)
+            .catch(() => setHistoryRows([]));
+        } else if (n === 8) {
           runInPlace(async () => {
             await undoLastAction();
             await fetchContext();
@@ -455,8 +566,13 @@ export function OverlayApp() {
       }
 
       if (m === "history") {
-        if (n === 0) setMenu("root");
-        // Task 6 wires the list itself; this shell just handles Back.
+        if (n === 0) {
+          setMenu("root");
+        } else if (n >= 1 && n <= 7) {
+          const idx = historyOffRef.current + (n - 1);
+          const row = historyRowsRef.current[idx];
+          if (row && row.exists) pickHistoryRow(row);
+        }
         return;
       }
 
@@ -496,7 +612,7 @@ export function OverlayApp() {
         }
       }
     },
-    [runAction, enterTyping, runInPlace, fetchContext],
+    [runAction, enterTyping, runInPlace, fetchContext, pickHistoryRow],
   );
 
   useEffect(() => {
@@ -513,6 +629,14 @@ export function OverlayApp() {
       if (flashTimer.current) window.clearTimeout(flashTimer.current);
     };
   }, []);
+
+  // Recomputed every render (cheap — at most 30 rows) rather than mirrored
+  // into state, so it always reflects the latest historyRows/sel/off.
+  const historyVp = overlayViewport(historyRows.length, historySel, historyOff);
+  const historyVisibleRows = historyRows.slice(
+    historyVp.offset,
+    historyVp.offset + 7,
+  );
 
   return (
     <div
@@ -547,6 +671,7 @@ export function OverlayApp() {
             <div className="px-4 pt-4 pb-3 border-b border-white/10 space-y-1.5">
               <div className="flex items-center justify-between gap-2">
                 <span className="text-[15px] font-semibold truncate" title={ctx.filename}>
+                  {ctx.fromHistory && <span className="text-primary mr-1">▸</span>}
                   {middleTruncate(ctx.filename)}
                 </span>
                 {ctx.binds.overlay && (
@@ -567,6 +692,12 @@ export function OverlayApp() {
                   </span>
                 )}
               </div>
+              {ctx.fromHistory && (
+                <div className="text-[11px] text-white/40">
+                  from history{ctx.game ? ` · ${ctx.game}` : ""}
+                  {ctx.targetTime ? ` · ${ctx.targetTime}` : ""}
+                </div>
+              )}
             </div>
 
             {/* Body */}
@@ -594,6 +725,9 @@ export function OverlayApp() {
                   <MenuRow n={7} label="History" onSelect={() => selectDigit(7)} />
                   <MenuRow n={8} label="Undo" onSelect={() => selectDigit(8)} />
                   <MenuRow n={9} label="App" onSelect={() => selectDigit(9)} />
+                  {ctx.fromHistory && (
+                    <MenuRow n="L" label="Back to latest clip" onSelect={backToLatest} />
+                  )}
                 </>
               ) : menu === "sort" ? (
                 <>
@@ -661,9 +795,32 @@ export function OverlayApp() {
                 </>
               ) : menu === "history" ? (
                 <>
-                  <div className="px-3 py-6 text-center text-white/40 text-[13px]">
-                    No clips yet today
+                  <div className="px-1 pb-1 text-[11px] uppercase tracking-wide text-white/40">
+                    Today&rsquo;s clips
                   </div>
+                  {historyVp.dotsAbove && (
+                    <div className="text-center text-[11px] text-white/40">▲ more</div>
+                  )}
+                  {historyRows.length === 0 ? (
+                    <div className="px-3 py-6 text-center text-white/40 text-[13px]">
+                      No clips yet today
+                    </div>
+                  ) : (
+                    historyVisibleRows.map((row, i) => (
+                      <MenuRow
+                        key={row.path}
+                        n={i + 1}
+                        label={middleTruncate(row.filename)}
+                        hint={row.game ?? row.time}
+                        disabled={!row.exists}
+                        selected={historyVp.offset + i === historySel}
+                        onSelect={() => pickHistoryRow(row)}
+                      />
+                    ))
+                  )}
+                  {historyVp.dotsBelow && (
+                    <div className="text-center text-[11px] text-white/40">▼ more</div>
+                  )}
                   <MenuRow n={0} label="Back" onSelect={() => selectDigit(0)} />
                 </>
               ) : menu === "app" ? (

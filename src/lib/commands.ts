@@ -64,6 +64,8 @@ export const editHistoryGame = (path: string, game: string, exe: string | null, 
 // --- Overlay (Task 6) ---
 export const overlayGetContext = () => invoke<OverlayContext>("overlay_get_context");
 export const overlayHistory = () => invoke<OverlayHistoryRow[]>("overlay_history");
+export const overlaySetTarget = (path: string) => invoke<void>("overlay_set_target", { path });
+export const overlayClearTarget = () => invoke<void>("overlay_clear_target");
 export const overlaySort = (key: number) => invoke<void>("overlay_sort", { key });
 export const overlayRate = (stars: number) => invoke<void>("overlay_rate", { stars });
 export const overlayLabel = (label: string) => invoke<void>("overlay_label", { label });
