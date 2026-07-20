@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import {
+  getDiagnostics,
+  hideMainWindow,
   hideOverlay,
   overlayDescribe,
   overlayGetContext,
@@ -9,12 +11,18 @@ import {
   overlayRate,
   overlaySetGame,
   overlaySort,
+  overlayTimerReset,
   overlayTimerToggle,
+  setWatchPaused,
+  showMainWindowNoactivate,
   startTypeMode,
   stopTypeMode,
+  undoLastAction,
+  wipeLog,
 } from "@/lib/commands";
+import { EVENTS } from "@/lib/events";
 import { errorMessage } from "@/lib/toast";
-import type { OverlayContext } from "@/types";
+import type { CountUpTick, OverlayContext } from "@/types";
 
 /** Target a "custom text" entry commits to once the user finishes typing. */
 type TypingTarget = "label" | "describe" | "game";
@@ -26,6 +34,9 @@ type Menu =
   | "label"
   | "describe"
   | "game"
+  | "history"
+  | "app"
+  | "timer"
   | { type: "typing"; target: TypingTarget; remember: boolean };
 
 type Flash = { kind: "success" | "error" | "warn"; text: string } | null;
@@ -46,6 +57,13 @@ function middleTruncate(name: string, max = 42): string {
 }
 
 const STAR_LABELS = ["★", "★★", "★★★", "★★★★", "★★★★★"];
+
+/** mm:ss, minutes unbounded (hours roll into minutes — 74:05 is fine). */
+function formatElapsed(secs: number): string {
+  const m = Math.floor(secs / 60);
+  const s = secs % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
 
 /** One numbered/clickable row in the overlay's CS:GO-style menu. */
 function MenuRow({
@@ -120,6 +138,30 @@ export function OverlayApp() {
   const [menu, setMenu] = useState<Menu>("root");
   const [typingBuffer, setTypingBuffer] = useState("");
   const [flash, setFlash] = useState<Flash>(null);
+  // Watcher-pause state for the App submenu's row-1 label — fetched fresh
+  // every time the submenu is entered (Diagnostics isn't otherwise pushed
+  // to this window).
+  const [watchPaused, setWatchPausedState] = useState<boolean | null>(null);
+  const watchPausedRef = useRef<boolean | null>(null);
+  useEffect(() => {
+    watchPausedRef.current = watchPaused;
+  }, [watchPaused]);
+  // Live count-up stopwatch — same event the main window's TimerDisplay
+  // consumes. Drives both the header "⏱ mm:ss" readout and the
+  // App/Timer submenu row labels (Start vs Stop).
+  const [countUp, setCountUp] = useState<CountUpTick>({ elapsedSecs: 0, running: false });
+  const countUpRef = useRef<CountUpTick>(countUp);
+  useEffect(() => {
+    countUpRef.current = countUp;
+  }, [countUp]);
+  useEffect(() => {
+    const un = listen<CountUpTick>(EVENTS.COUNT_UP_TICK, (e) => {
+      setCountUp(e.payload);
+    });
+    return () => {
+      un.then((fn) => fn());
+    };
+  }, []);
 
   // Refs mirror state that the overlay-key / overlay-type listeners need to
   // read synchronously — the listeners are registered once and must always
@@ -221,6 +263,33 @@ export function OverlayApp() {
     [showFlash, closeAfter],
   );
 
+  // Clears the flash without hiding the overlay — for actions (Undo, App
+  // submenu, Timer submenu) that must leave the overlay open afterward.
+  const flashOnly = useCallback((ms: number) => {
+    if (flashTimer.current) window.clearTimeout(flashTimer.current);
+    flashTimer.current = window.setTimeout(() => {
+      flashRef.current = null;
+      setFlash(null);
+    }, ms);
+  }, []);
+
+  // Same shape as `runAction` but keeps the overlay open — used by actions
+  // that make sense to fire repeatedly without re-summoning the overlay
+  // (Undo, watch pause/resume, count-up start/stop, etc).
+  const runInPlace = useCallback(
+    async (fn: () => Promise<void>, successText: string) => {
+      try {
+        await fn();
+        showFlash("success", successText);
+        flashOnly(900);
+      } catch (e) {
+        showFlash("error", errorMessage(e));
+        flashOnly(1500);
+      }
+    },
+    [showFlash, flashOnly],
+  );
+
   const needsTypingFallback = useCallback(async () => {
     try {
       await overlayNeedsLabel();
@@ -316,7 +385,22 @@ export function OverlayApp() {
         else if (n === 3) setMenu("label");
         else if (n === 4) setMenu("describe");
         else if (n === 5) setMenu("game");
-        else if (n === 6) runAction(() => overlayTimerToggle(), "Timer toggled");
+        else if (n === 6) setMenu("timer");
+        else if (n === 7) setMenu("history");
+        else if (n === 8) {
+          runInPlace(async () => {
+            await undoLastAction();
+            await fetchContext();
+          }, "Undid last action");
+        } else if (n === 9) {
+          setMenu("app");
+          getDiagnostics()
+            .then((d) => {
+              watchPausedRef.current = d.watchPaused;
+              setWatchPausedState(d.watchPaused);
+            })
+            .catch(() => {});
+        }
         return;
       }
 
@@ -367,9 +451,48 @@ export function OverlayApp() {
         } else if (n === 3 && c?.exe) {
           enterTyping("game", true);
         }
+        return;
+      }
+
+      if (m === "history") {
+        if (n === 0) setMenu("root");
+        // Task 6 wires the list itself; this shell just handles Back.
+        return;
+      }
+
+      if (m === "app") {
+        if (n === 0) setMenu("root");
+        else if (n === 1) {
+          const paused = watchPausedRef.current ?? false;
+          runInPlace(async () => {
+            await setWatchPaused(!paused);
+            watchPausedRef.current = !paused;
+            setWatchPausedState(!paused);
+          }, paused ? "Watching resumed" : "Watching paused");
+        } else if (n === 2) {
+          runInPlace(() => showMainWindowNoactivate(), "ClipShelf window shown");
+        } else if (n === 3) {
+          runInPlace(() => hideMainWindow(), "Hidden to tray");
+        } else if (n === 4) {
+          runInPlace(() => wipeLog(), "Wiped current clip");
+        } else if (n === 5) {
+          const running = countUpRef.current.running;
+          runInPlace(() => overlayTimerToggle(), running ? "Count-up stopped" : "Count-up started");
+        }
+        return;
+      }
+
+      if (m === "timer") {
+        if (n === 0) setMenu("root");
+        else if (n === 1) {
+          const running = countUpRef.current.running;
+          runInPlace(() => overlayTimerToggle(), running ? "Count-up stopped" : "Count-up started");
+        } else if (n === 2) {
+          runInPlace(() => overlayTimerReset(), "Stopwatch reset");
+        }
       }
     },
-    [runAction, enterTyping],
+    [runAction, enterTyping, runInPlace, fetchContext],
   );
 
   useEffect(() => {
@@ -428,11 +551,18 @@ export function OverlayApp() {
                   </span>
                 )}
               </div>
-              {ctx.game && (
-                <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-primary/20 text-primary text-[11px] font-medium">
-                  {ctx.game}
-                </span>
-              )}
+              <div className="flex items-center gap-2">
+                {ctx.game && (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-primary/20 text-primary text-[11px] font-medium">
+                    {ctx.game}
+                  </span>
+                )}
+                {countUp.running && (
+                  <span className="text-[11px] font-mono text-white/70">
+                    ⏱ {formatElapsed(countUp.elapsedSecs)}
+                  </span>
+                )}
+              </div>
             </div>
 
             {/* Body */}
@@ -457,6 +587,9 @@ export function OverlayApp() {
                   <MenuRow n={4} label="Description" onSelect={() => selectDigit(4)} />
                   <MenuRow n={5} label="Game" onSelect={() => selectDigit(5)} />
                   <MenuRow n={6} label="Timer" onSelect={() => selectDigit(6)} />
+                  <MenuRow n={7} label="History" onSelect={() => selectDigit(7)} />
+                  <MenuRow n={8} label="Undo" onSelect={() => selectDigit(8)} />
+                  <MenuRow n={9} label="App" onSelect={() => selectDigit(9)} />
                 </>
               ) : menu === "sort" ? (
                 <>
@@ -520,6 +653,40 @@ export function OverlayApp() {
                     disabled={!ctx.exe}
                     onSelect={() => selectDigit(3)}
                   />
+                  <MenuRow n={0} label="Back" onSelect={() => selectDigit(0)} />
+                </>
+              ) : menu === "history" ? (
+                <>
+                  <div className="px-3 py-6 text-center text-white/40 text-[13px]">
+                    No clips yet today
+                  </div>
+                  <MenuRow n={0} label="Back" onSelect={() => selectDigit(0)} />
+                </>
+              ) : menu === "app" ? (
+                <>
+                  <MenuRow
+                    n={1}
+                    label={watchPaused ? "Resume watching" : "Pause watching"}
+                    onSelect={() => selectDigit(1)}
+                  />
+                  <MenuRow n={2} label="Open ClipShelf window" onSelect={() => selectDigit(2)} />
+                  <MenuRow n={3} label="Hide to tray" onSelect={() => selectDigit(3)} />
+                  <MenuRow n={4} label="Wipe current clip" onSelect={() => selectDigit(4)} />
+                  <MenuRow
+                    n={5}
+                    label={countUp.running ? "Stop count-up" : "Start count-up"}
+                    onSelect={() => selectDigit(5)}
+                  />
+                  <MenuRow n={0} label="Back" onSelect={() => selectDigit(0)} />
+                </>
+              ) : menu === "timer" ? (
+                <>
+                  <MenuRow
+                    n={1}
+                    label={countUp.running ? "Stop count-up" : "Start count-up"}
+                    onSelect={() => selectDigit(1)}
+                  />
+                  <MenuRow n={2} label="Reset" onSelect={() => selectDigit(2)} />
                   <MenuRow n={0} label="Back" onSelect={() => selectDigit(0)} />
                 </>
               ) : (
