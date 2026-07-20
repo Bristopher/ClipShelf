@@ -165,7 +165,10 @@ impl AppStateInner {
             self.clip_games.insert(to.clone(), g.clone());
         }
         if let Some(exe) = self.clip_exes.remove(from) {
-            self.clip_exes.insert(to, exe);
+            self.clip_exes.insert(to.clone(), exe);
+        }
+        if self.overlay_target.as_deref() == Some(from) {
+            self.overlay_target = Some(to);
         }
         game
     }
@@ -387,6 +390,31 @@ mod tests {
         // Re-key an untracked path: no-op, no panic.
         let ghost = PathBuf::from("C:/clips/ghost.mp4");
         assert_eq!(s.rekey_clip(&ghost, PathBuf::from("C:/x.mp4")), None);
+    }
+
+    #[test]
+    fn test_rekey_clip_follows_overlay_target() {
+        let mut s = AppStateInner::new(AppConfig::default(), PathBuf::new());
+        let a = PathBuf::from("C:/clips/a.mp4");
+        let b = PathBuf::from("C:/clips/sorted/a - clutch.mp4");
+
+        // overlay_target points at the clip being renamed: it must follow.
+        s.overlay_target = Some(a.clone());
+        s.rekey_clip(&a, b.clone());
+        assert_eq!(s.overlay_target, Some(b.clone()));
+
+        // Re-keying an unrelated path must not disturb an already-set target.
+        let c = PathBuf::from("C:/clips/c.mp4");
+        let d = PathBuf::from("C:/clips/d.mp4");
+        s.rekey_clip(&c, d);
+        assert_eq!(s.overlay_target, Some(b));
+
+        // No overlay_target set: rekey_clip is a no-op for it (stays None).
+        s.overlay_target = None;
+        let e = PathBuf::from("C:/clips/e.mp4");
+        let f = PathBuf::from("C:/clips/f.mp4");
+        s.rekey_clip(&e, f);
+        assert_eq!(s.overlay_target, None);
     }
 
     #[test]

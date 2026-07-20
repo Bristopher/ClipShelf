@@ -358,7 +358,7 @@ pub fn run() {
                                 let app = app_handle.clone();
                                 let st = state.clone();
                                 tauri::async_runtime::spawn_blocking(move || {
-                                    commands::do_undo(&app, &st);
+                                    let _ = commands::do_undo(&app, &st);
                                 });
                             }
                             HotkeyAction::SaveClipHealthCheck => {

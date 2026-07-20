@@ -603,3 +603,7 @@ fixed. Human items:
 - [ ] In an exclusive-fullscreen game: the expanded overlay still never
       steals focus; arrow keys only act while the overlay is open (game
       arrow binds unaffected after close)
+- [ ] After sorting/labeling an older history clip, a plain G1/G2/G3 hotkey
+      press acts on THAT clip (last-acted-on becomes current — intended
+      drag-drop-consistent semantics); confirm this matches expectations
+      in real use

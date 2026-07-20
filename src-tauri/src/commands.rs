@@ -846,35 +846,47 @@ pub async fn undo_last_action(state: State<'_, AppState>, app: AppHandle) -> Res
     let st = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || do_undo(&app, &st))
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?
 }
 
 /// Reverse the most recent action (a single move/rename, or every file of a
 /// batch drop — restored in reverse order). Free function so the global
 /// undo hotkey can call it directly in Rust, same as do_press_gkey.
-pub fn do_undo(app: &AppHandle, state: &AppState) {
+///
+/// Returns `Err` when there was nothing to undo, or when any per-file
+/// restore failed, so `undo_last_action` can surface the real outcome to
+/// the frontend instead of always flashing success. All existing
+/// logging/emit behavior is unchanged — this only affects the return value.
+pub fn do_undo(app: &AppHandle, state: &AppState) -> Result<(), String> {
     let popped = {
-        let Ok(mut s) = state.lock() else { return };
+        let Ok(mut s) = state.lock() else {
+            return Err("State lock poisoned".to_string());
+        };
         s.undo_stack.pop()
     };
     let Some(entry) = popped else {
-        let Ok(mut s) = state.lock() else { return };
+        let Ok(mut s) = state.lock() else {
+            return Err("State lock poisoned".to_string());
+        };
         let log = s.logger.log(
             LogLevel::Info,
             "Nothing to undo".to_string(),
             LogCategory::System,
         );
         let _ = app.emit("log-entry", &log);
-        return;
+        return Err("Nothing to undo".to_string());
     };
 
     let total = entry.moves.len();
     let mut restored_count = 0usize;
+    let mut first_error: Option<String> = None;
     for mv in entry.moves.iter().rev() {
         match mover::restore_file(&mv.to, &mv.from) {
             Ok(restored) => {
                 restored_count += 1;
-                let Ok(mut s) = state.lock() else { return };
+                let Ok(mut s) = state.lock() else {
+                    return Err("State lock poisoned".to_string());
+                };
                 s.current_file = Some(CurrentFile {
                     path: restored.clone(),
                     moved_path: None,
@@ -917,17 +929,19 @@ pub fn do_undo(app: &AppHandle, state: &AppState) {
                 crate::history::append(&crate::history::history_path(&config_path), &ev);
             }
             Err(e) => {
-                let Ok(mut s) = state.lock() else { return };
-                let log = s.logger.log(
-                    LogLevel::Error,
-                    format!("Undo failed: {}", e),
-                    LogCategory::System,
-                );
+                let msg = format!("Undo failed: {}", e);
+                if first_error.is_none() {
+                    first_error = Some(msg.clone());
+                }
+                let Ok(mut s) = state.lock() else {
+                    return Err("State lock poisoned".to_string());
+                };
+                let log = s.logger.log(LogLevel::Error, msg.clone(), LogCategory::System);
                 let _ = app.emit("log-entry", &log);
                 let _ = app.emit(
                     "error",
                     ErrorPayload {
-                        message: format!("Undo failed: {}", e),
+                        message: msg,
                         context: "undo".to_string(),
                     },
                 );
@@ -937,13 +951,20 @@ pub fn do_undo(app: &AppHandle, state: &AppState) {
 
     // Batch summary so the user sees one line for the whole action.
     if total > 1 {
-        let Ok(mut s) = state.lock() else { return };
+        let Ok(mut s) = state.lock() else {
+            return Err("State lock poisoned".to_string());
+        };
         let log = s.logger.log(
             LogLevel::Info,
             format!("Undo batch: restored {}/{} files", restored_count, total),
             LogCategory::System,
         );
         let _ = app.emit("log-entry", &log);
+    }
+
+    match first_error {
+        Some(e) => Err(e),
+        None => Ok(()),
     }
 }
 
