@@ -1,6 +1,6 @@
 # Master Verification Checklist (2026-07-10)
 
-**Updated:** 2026-07-19 (adds §23 overlay command center; 07-18 reworked §20 popup-free updates + webview-unlock wait, added §22 hold-to-click-through)
+**Updated:** 2026-07-20 (adds §24 overlay backdrop fix + thumbnail strip + arrow/WASD/Enter nav; 07-19 added §23 overlay command center)
 
 Everything code-verified but not yet exercised live, across three batches:
 the 2026-07-02 QoL batch (undo, pause, clickable log, autostart, window
@@ -607,3 +607,42 @@ fixed. Human items:
       press acts on THAT clip (last-acted-on becomes current — intended
       drag-drop-consistent semantics); confirm this matches expectations
       in real use
+
+## 24. Overlay backdrop fix + thumbnail strip + arrow/WASD/Enter nav
+
+Shipped 2026-07-20. Backdrop: the overlay window rendered an opaque white
+sheet behind the menu card — a known Windows/WebView2 issue where an
+undecorated transparent window with a DWM shadow stays white until resized
+(tauri#8308/#8632). Fixed with `.shadow(false)` at creation plus a
+tray-menu-style `set_size` re-assert on every show. Strip: the root menu
+now shows a horizontal rolodex of today's clips as Explorer thumbnails
+(`IShellItemImageFactory` → BMP data URL, backend-cached, failures retried
+on next open), latest-first with the latest selected; ◀/▶ moves the
+selection and retargets ALL menu actions to that clip (index 0 = back to
+latest). Nav: ▲/▼ moves a highlighted row in every flat menu (disabled
+rows skipped), Enter activates it; the history rolodex keeps its own ▲▼
+and gains Enter-to-pick. New Settings toggle "WASD navigation"
+(`overlay_wasd_nav`, default OFF) aliases W/S/A/D to the arrows — bound
+ONLY while the overlay is open.
+
+**Automated coverage** — 120 cargo tests (temp-bindings shape 16 keys,
+WASD aliases, config default), 8 vitest, builds clean. Human items:
+
+- [ ] Overlay over desktop AND over a fullscreen game: NO white/grey
+      backdrop — only the dark rounded card floats (screenshot bug gone),
+      first open and every reopen
+- [ ] Root menu shows the thumbnail strip with real video thumbnails;
+      "latest" caption on the first thumb; freshly recorded clip shows 🎬
+      placeholder then a real thumb on a later reopen
+- [ ] ◀/▶ (and A/D with the toggle on) moves the strip selection; header
+      retargets live ("▸ name · from history"); menu actions hit the
+      selected clip; ◀ back to the first thumb returns to latest
+- [ ] ▲/▼ + Enter walks and activates rows in root and every submenu;
+      digits still direct-select; disabled rows (Edit & remember without
+      exe, watcher row while loading) are skipped by the highlight
+- [ ] History submenu: Enter picks the highlighted row (same as digit)
+- [ ] WASD toggle OFF (default): W/A/S/D reach the game while the overlay
+      is open; ON: they navigate, and after closing the overlay the game
+      gets them back instantly; typing mode still types w/a/s/d characters
+- [ ] Strip mouse clicks select/retarget; dead (deleted) clips render
+      dimmed and can be scrolled past but never targeted

@@ -53,6 +53,7 @@ fn default_game_overrides() -> Vec<GameOverride> { Vec::new() }
 fn default_overlay_enabled() -> bool { true }
 fn default_overlay_bind() -> String { "shift+F1".to_string() }
 fn default_overlay_typing_enabled() -> bool { true }
+fn default_overlay_wasd_nav() -> bool { false }
 fn default_label_presets() -> Vec<String> { vec!["clutch".to_string(), "ace".to_string(), "funny".to_string(), "fail".to_string()] }
 fn default_description_presets() -> Vec<String> { Vec::new() }
 
@@ -271,6 +272,12 @@ pub struct AppConfig {
     #[serde(default = "default_overlay_typing_enabled")]
     pub overlay_typing_enabled: bool,
 
+    /// Also bind W/S/A/D as arrow-key aliases while the overlay is open.
+    /// Off by default — the keys are only ever registered while the overlay
+    /// panel is up, but some players still don't want movement keys touched.
+    #[serde(default = "default_overlay_wasd_nav")]
+    pub overlay_wasd_nav: bool,
+
     /// One-keypress label chips in the overlay.
     #[serde(default = "default_label_presets")]
     pub label_presets: Vec<String>,
@@ -331,6 +338,7 @@ impl Default for AppConfig {
             overlay_enabled: default_overlay_enabled(),
             overlay_bind: default_overlay_bind(),
             overlay_typing_enabled: default_overlay_typing_enabled(),
+            overlay_wasd_nav: default_overlay_wasd_nav(),
             label_presets: default_label_presets(),
             description_presets: default_description_presets(),
         }
@@ -650,6 +658,7 @@ timer_duration_ms = 45000
         assert!(cfg.overlay_enabled);
         assert_eq!(cfg.overlay_bind, "shift+F1");
         assert!(cfg.overlay_typing_enabled);
+        assert!(!cfg.overlay_wasd_nav);
         assert_eq!(cfg.label_presets, vec!["clutch", "ace", "funny", "fail"]);
         assert!(cfg.description_presets.is_empty());
     }

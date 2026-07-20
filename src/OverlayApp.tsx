@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import {
+  clipThumbnail,
   getDiagnostics,
   hideMainWindow,
   hideOverlay,
@@ -61,6 +62,20 @@ function middleTruncate(name: string, max = 42): string {
 }
 
 const STAR_LABELS = ["★", "★★", "★★★", "★★★★", "★★★★★"];
+
+/** Thumbnails visible at once in the root menu's clip strip. */
+const STRIP_VISIBLE = 4;
+
+/** One row of a flat (non-history, non-typing) menu, as data — the arrow-key
+ *  highlight and Enter activation need the row list to be enumerable, not
+ *  buried in JSX branches. */
+type RowDef = {
+  n: number | string;
+  label: React.ReactNode;
+  hint?: string;
+  disabled?: boolean;
+  onSelect: () => void;
+};
 
 /** mm:ss, minutes unbounded (hours roll into minutes — 74:05 is fine). */
 function formatElapsed(secs: number): string {
@@ -181,6 +196,23 @@ export function OverlayApp() {
   useEffect(() => {
     historyOffRef.current = historyOff;
   }, [historyOff]);
+  // Thumbnail strip (root menu): its own selection/offset over the SAME
+  // historyRows, independent of the history submenu's rolodex selection.
+  // Index 0 = latest clip (rows are newest-first).
+  const [stripSel, setStripSel] = useState(0);
+  const [stripOff, setStripOff] = useState(0);
+  const stripSelRef = useRef(0);
+  const stripOffRef = useRef(0);
+  // path → data URL; a `null` value means requested-but-failed (placeholder).
+  // Failed entries are dropped on every overlay open so a clip whose shell
+  // thumbnail wasn't ready yet (freshly recorded) gets retried.
+  const thumbsRef = useRef(new Map<string, string | null>());
+  const [, setThumbTick] = useState(0);
+  // Arrow-key row highlight for the flat menus (root + submenus; the history
+  // rolodex and typing mode have their own selection models).
+  const [rowSel, setRowSel] = useState(0);
+  const rowSelRef = useRef(0);
+  const rowDefsRef = useRef<RowDef[]>([]);
   // Tracks whether the backend's acting-clip target was set as of the last
   // fetchContext() — lets fetchContext detect the target vanishing out from
   // under us (fromHistory flips true -> false without us clearing it).
@@ -260,6 +292,16 @@ export function OverlayApp() {
     setMenu("root");
     setTypingBuffer("");
     bufferRef.current = "";
+    // Strip back to the latest clip (the backend target was cleared on hide).
+    stripSelRef.current = 0;
+    stripOffRef.current = 0;
+    setStripSel(0);
+    setStripOff(0);
+    // Drop failed thumbnail fetches so they retry — a clip recorded seconds
+    // before the last open often has no shell thumbnail yet.
+    for (const [k, v] of thumbsRef.current) {
+      if (v === null) thumbsRef.current.delete(k);
+    }
     // Every overlay close clears the backend's acting-clip target by design
     // (overlay.rs hide()). Acknowledge that here so the next reopen's
     // fetchContext doesn't mistake the routine reset for the targeted clip
@@ -274,12 +316,32 @@ export function OverlayApp() {
     stopTypeMode().catch(() => {});
   }, []);
 
+  // Refetch today's rows for the thumbnail strip, clamping its selection
+  // against the (possibly shorter) refreshed list.
+  const refreshStrip = useCallback(() => {
+    overlayHistory()
+      .then((rows) => {
+        setHistoryRows(rows);
+        const sel = Math.max(0, Math.min(stripSelRef.current, rows.length - 1));
+        const vp = overlayViewport(rows.length, sel, stripOffRef.current, STRIP_VISIBLE);
+        stripSelRef.current = sel;
+        stripOffRef.current = vp.offset;
+        setStripSel(sel);
+        setStripOff(vp.offset);
+      })
+      .catch(() => {});
+  }, []);
+  const refreshStripRef = useRef(refreshStrip);
+  refreshStripRef.current = refreshStrip;
+
   // Initial fetch + refetch every time the main app re-opens the overlay.
   useEffect(() => {
     fetchContext();
+    refreshStripRef.current();
     const unOpen = listen("overlay-open", () => {
       resetToRoot();
       fetchContext();
+      refreshStripRef.current();
     });
     const unVisible = listen<{ visible: boolean }>("overlay-visible", (e) => {
       if (!e.payload?.visible) resetToRoot();
@@ -351,6 +413,21 @@ export function OverlayApp() {
       try {
         await overlaySetTarget(row.path);
         await fetchContext();
+        // Mirror the pick into the thumbnail strip so root shows the same
+        // clip selected.
+        const idx = historyRowsRef.current.findIndex((r) => r.path === row.path);
+        if (idx >= 0) {
+          const vp = overlayViewport(
+            historyRowsRef.current.length,
+            idx,
+            stripOffRef.current,
+            STRIP_VISIBLE,
+          );
+          stripSelRef.current = idx;
+          stripOffRef.current = vp.offset;
+          setStripSel(idx);
+          setStripOff(vp.offset);
+        }
         setMenu("root");
       } catch (e) {
         showFlash("error", errorMessage(e));
@@ -378,6 +455,10 @@ export function OverlayApp() {
   const backToLatest = useCallback(async () => {
     if (flashRef.current) return;
     wasTargetedRef.current = false;
+    stripSelRef.current = 0;
+    stripOffRef.current = 0;
+    setStripSel(0);
+    setStripOff(0);
     try {
       await overlayClearTarget();
       await fetchContext();
@@ -388,6 +469,54 @@ export function OverlayApp() {
       flashOnly(1500);
     }
   }, [fetchContext, showFlash, flashOnly]);
+
+  // Move the thumbnail strip's selection to `target` and retarget the
+  // backend's acting clip to match (index 0 = back to the latest clip).
+  // Vanished clips can be browsed past but are never targeted.
+  const stripSeek = useCallback(
+    (target: number) => {
+      if (flashRef.current) return;
+      const rows = historyRowsRef.current;
+      if (rows.length === 0) return;
+      const sel = Math.max(0, Math.min(rows.length - 1, target));
+      if (sel === stripSelRef.current) return;
+      const vp = overlayViewport(rows.length, sel, stripOffRef.current, STRIP_VISIBLE);
+      stripSelRef.current = sel;
+      stripOffRef.current = vp.offset;
+      setStripSel(sel);
+      setStripOff(vp.offset);
+      const row = rows[sel];
+      if (sel !== 0 && !row.exists) return;
+      // Deliberate retarget — must not read as "target vanished" (index 0
+      // flips fromHistory back to false, which the vanish heuristic watches).
+      wasTargetedRef.current = false;
+      const act = sel === 0 ? overlayClearTarget() : overlaySetTarget(row.path);
+      act.then(fetchContext).catch((e) => {
+        showFlash("error", errorMessage(e));
+        flashOnly(1200);
+      });
+    },
+    [fetchContext, showFlash, flashOnly],
+  );
+
+  // Fetch shell thumbnails for the strip's visible slice (backend caches;
+  // the Map here just avoids re-invoking per render).
+  useEffect(() => {
+    const visible = historyRows.slice(stripOff, stripOff + STRIP_VISIBLE);
+    for (const row of visible) {
+      if (!row.exists || thumbsRef.current.has(row.path)) continue;
+      thumbsRef.current.set(row.path, null);
+      clipThumbnail(row.path)
+        .then((url) => {
+          thumbsRef.current.set(row.path, url);
+          setThumbTick((t) => t + 1);
+        })
+        .catch(() => {
+          // Stays null → placeholder; retried on the next overlay open.
+          setThumbTick((t) => t + 1);
+        });
+    }
+  }, [historyRows, stripOff]);
 
   const needsTypingFallback = useCallback(async () => {
     try {
@@ -478,21 +607,51 @@ export function OverlayApp() {
       if (typeof m === "object") return; // typing mode ignores digits
       if (flashRef.current) return; // action pending/flashing — no re-fire
 
-      // Arrow-key nav (11 = Up, 12 = Down) only does anything in the history
-      // rolodex — every other menu is flat and has no scrollable selection.
-      if (n === 11 || n === 12) {
-        if (m !== "history") return;
-        const rows = historyRowsRef.current;
-        if (rows.length === 0) return;
-        const sel =
-          n === 11
-            ? Math.max(0, historySelRef.current - 1)
-            : Math.min(rows.length - 1, historySelRef.current + 1);
-        const vp = overlayViewport(rows.length, sel, historyOffRef.current);
-        historySelRef.current = sel;
-        historyOffRef.current = vp.offset;
-        setHistorySel(sel);
-        setHistoryOff(vp.offset);
+      // Navigation keys: 11 = Up, 12 = Down, 13 = Left, 14 = Right,
+      // 15 = Enter (W/S/A/D alias the arrows when the Settings toggle is on).
+      if (n >= 11 && n <= 15) {
+        if (m === "history") {
+          // The rolodex keeps its own vertical selection; Enter targets it.
+          if (n === 11 || n === 12) {
+            const rows = historyRowsRef.current;
+            if (rows.length === 0) return;
+            const sel =
+              n === 11
+                ? Math.max(0, historySelRef.current - 1)
+                : Math.min(rows.length - 1, historySelRef.current + 1);
+            const vp = overlayViewport(rows.length, sel, historyOffRef.current);
+            historySelRef.current = sel;
+            historyOffRef.current = vp.offset;
+            setHistorySel(sel);
+            setHistoryOff(vp.offset);
+          } else if (n === 15) {
+            const row = historyRowsRef.current[historySelRef.current];
+            if (row && row.exists) pickHistoryRow(row);
+          }
+          return;
+        }
+        if (n === 11 || n === 12) {
+          // Move the row highlight, skipping disabled rows.
+          const defs = rowDefsRef.current;
+          if (defs.length === 0) return;
+          const dir = n === 11 ? -1 : 1;
+          let i = rowSelRef.current + dir;
+          while (i >= 0 && i < defs.length && defs[i].disabled) i += dir;
+          if (i < 0 || i >= defs.length) return;
+          rowSelRef.current = i;
+          setRowSel(i);
+          return;
+        }
+        if (n === 13 || n === 14) {
+          // Left/Right drive the root menu's thumbnail strip: left = newer,
+          // right = older (rows are newest-first).
+          if (m !== "root") return;
+          stripSeek(stripSelRef.current + (n === 13 ? -1 : 1));
+          return;
+        }
+        // Enter — activate the highlighted row.
+        const d = rowDefsRef.current[rowSelRef.current];
+        if (d && !d.disabled) d.onSelect();
         return;
       }
 
@@ -516,6 +675,8 @@ export function OverlayApp() {
           runInPlace(async () => {
             await undoLastAction();
             await fetchContext();
+            // Undo can rename/restore files — the strip's rows are stale.
+            refreshStripRef.current();
           }, "Undid last action");
         } else if (n === 9) {
           setMenu("app");
@@ -626,7 +787,7 @@ export function OverlayApp() {
         }
       }
     },
-    [runAction, enterTyping, runInPlace, fetchContext, pickHistoryRow],
+    [runAction, enterTyping, runInPlace, fetchContext, pickHistoryRow, stripSeek],
   );
 
   useEffect(() => {
@@ -651,6 +812,124 @@ export function OverlayApp() {
     historyVp.offset,
     historyVp.offset + 7,
   );
+  const stripVp = overlayViewport(historyRows.length, stripSel, stripOff, STRIP_VISIBLE);
+  const stripRows = historyRows.slice(stripVp.offset, stripVp.offset + STRIP_VISIBLE);
+
+  // The flat menus as data — drives rendering AND the arrow/Enter nav.
+  const rowDefs: RowDef[] = (() => {
+    if (!ctx || typeof menu !== "string") return [];
+    switch (menu) {
+      case "root": {
+        const defs: RowDef[] = [
+          { n: 1, label: "Sort", hint: "G1/G2/G3", onSelect: () => selectDigit(1) },
+          { n: 2, label: "Rate", onSelect: () => selectDigit(2) },
+          { n: 3, label: "Label", onSelect: () => selectDigit(3) },
+          { n: 4, label: "Description", onSelect: () => selectDigit(4) },
+          { n: 5, label: "Game", onSelect: () => selectDigit(5) },
+          { n: 6, label: "Timer", onSelect: () => selectDigit(6) },
+          { n: 7, label: "History", onSelect: () => selectDigit(7) },
+          { n: 8, label: "Undo", onSelect: () => selectDigit(8) },
+          { n: 9, label: "App", onSelect: () => selectDigit(9) },
+        ];
+        if (ctx.fromHistory) {
+          defs.push({ n: "L", label: "Back to latest clip", onSelect: backToLatest });
+        }
+        return defs;
+      }
+      case "sort":
+        return [
+          { n: 1, label: ctx.binds.g1Name || "G1", hint: ctx.binds.g1, onSelect: () => selectDigit(1) },
+          { n: 2, label: ctx.binds.g2Name || "G2", hint: ctx.binds.g2, onSelect: () => selectDigit(2) },
+          { n: 3, label: ctx.binds.g3Name || "G3", hint: ctx.binds.g3, onSelect: () => selectDigit(3) },
+          { n: 0, label: "Back", onSelect: () => selectDigit(0) },
+        ];
+      case "rate":
+        return [
+          ...STAR_LABELS.map((stars, i) => ({
+            n: i + 1,
+            label: <span className="text-amber-400">{stars}</span>,
+            onSelect: () => selectDigit(i + 1),
+          })),
+          { n: 0, label: "Back", onSelect: () => selectDigit(0) },
+        ];
+      case "label":
+        return [
+          ...ctx.labelPresets.slice(0, 9).map((p, i) => ({
+            n: i + 1,
+            label: p,
+            onSelect: () => selectDigit(i + 1),
+          })),
+          { n: 0, label: "Custom…", onSelect: () => selectDigit(0) },
+        ];
+      case "describe":
+        return [
+          ...ctx.descriptionPresets.slice(0, 9).map((p, i) => ({
+            n: i + 1,
+            label: p,
+            onSelect: () => selectDigit(i + 1),
+          })),
+          { n: 0, label: "Custom…", onSelect: () => selectDigit(0) },
+        ];
+      case "game":
+        return [
+          {
+            n: 1,
+            label: ctx.game ? `Keep "${ctx.game}"` : "Keep (no game detected)",
+            onSelect: () => selectDigit(1),
+          },
+          { n: 2, label: "Edit (type)", onSelect: () => selectDigit(2) },
+          { n: 3, label: "Edit & remember", disabled: !ctx.exe, onSelect: () => selectDigit(3) },
+          { n: 0, label: "Back", onSelect: () => selectDigit(0) },
+        ];
+      case "app":
+        return [
+          {
+            n: 1,
+            label:
+              watchPaused === null
+                ? "Loading watcher state…"
+                : watchPaused
+                  ? "Resume watching"
+                  : "Pause watching",
+            disabled: watchPaused === null,
+            onSelect: () => selectDigit(1),
+          },
+          { n: 2, label: "Open ClipShelf window", onSelect: () => selectDigit(2) },
+          { n: 3, label: "Hide to tray", onSelect: () => selectDigit(3) },
+          { n: 4, label: "Wipe current clip", onSelect: () => selectDigit(4) },
+          {
+            n: 5,
+            label: countUp.running ? "Stop count-up" : "Start count-up",
+            onSelect: () => selectDigit(5),
+          },
+          { n: 0, label: "Back", onSelect: () => selectDigit(0) },
+        ];
+      case "timer":
+        return [
+          {
+            n: 1,
+            label: countUp.running ? "Stop count-up" : "Start count-up",
+            onSelect: () => selectDigit(1),
+          },
+          { n: 2, label: "Reset", onSelect: () => selectDigit(2) },
+          { n: 0, label: "Back", onSelect: () => selectDigit(0) },
+        ];
+      default:
+        return [];
+    }
+  })();
+  rowDefsRef.current = rowDefs;
+
+  // Reset the row highlight to the first enabled row whenever the menu
+  // changes (runs after render, so it sees the fresh rowDefs).
+  const menuKey = typeof menu === "string" ? menu : "typing";
+  useEffect(() => {
+    const first = rowDefsRef.current.findIndex((d) => !d.disabled);
+    const sel = first < 0 ? 0 : first;
+    rowSelRef.current = sel;
+    setRowSel(sel);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [menuKey]);
 
   return (
     <div
@@ -714,6 +993,76 @@ export function OverlayApp() {
               )}
             </div>
 
+            {/* Thumbnail strip — today's clips, latest first; ◀/▶ (or A/D)
+                moves the selection and retargets every menu action to the
+                selected clip. */}
+            {menu === "root" && historyRows.length > 0 && (
+              <div className="px-3 py-2.5 border-b border-white/10">
+                <div className="flex items-center gap-1">
+                  <span
+                    className={`shrink-0 w-3 text-center text-[10px] ${
+                      stripVp.dotsAbove ? "text-white/60" : "text-white/15"
+                    }`}
+                  >
+                    ◀
+                  </span>
+                  <div className="flex-1 flex justify-center gap-1.5 min-w-0">
+                    {stripRows.map((row, i) => {
+                      const idx = stripVp.offset + i;
+                      const isSel = idx === stripSel;
+                      const url = thumbsRef.current.get(row.path);
+                      return (
+                        <button
+                          key={row.path}
+                          type="button"
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            stripSeek(idx);
+                          }}
+                          className="shrink-0 w-[74px]"
+                        >
+                          <div
+                            className={`aspect-video rounded-md overflow-hidden border transition-colors ${
+                              isSel
+                                ? "border-primary ring-1 ring-primary"
+                                : "border-white/10 hover:border-white/30"
+                            } ${row.exists ? "" : "opacity-40"}`}
+                          >
+                            {url ? (
+                              <img
+                                src={url}
+                                alt=""
+                                draggable={false}
+                                className="w-full h-full object-cover"
+                              />
+                            ) : (
+                              <div className="w-full h-full bg-white/5 flex items-center justify-center text-white/30 text-sm">
+                                🎬
+                              </div>
+                            )}
+                          </div>
+                          <div
+                            className={`mt-0.5 text-[9px] truncate text-center ${
+                              isSel ? "text-white/80" : "text-white/40"
+                            }`}
+                          >
+                            {idx === 0 ? "latest" : row.time}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <span
+                    className={`shrink-0 w-3 text-center text-[10px] ${
+                      stripVp.dotsBelow ? "text-white/60" : "text-white/15"
+                    }`}
+                  >
+                    ▶
+                  </span>
+                </div>
+              </div>
+            )}
+
             {/* Body */}
             <div className="flex-1 overflow-y-auto px-3 py-3 space-y-1.5">
               {flash ? (
@@ -728,84 +1077,19 @@ export function OverlayApp() {
                 >
                   {flash.text}
                 </div>
-              ) : menu === "root" ? (
+              ) : typeof menu === "string" && menu !== "history" ? (
                 <>
-                  <MenuRow n={1} label="Sort" hint="G1/G2/G3" onSelect={() => selectDigit(1)} />
-                  <MenuRow n={2} label="Rate" onSelect={() => selectDigit(2)} />
-                  <MenuRow n={3} label="Label" onSelect={() => selectDigit(3)} />
-                  <MenuRow n={4} label="Description" onSelect={() => selectDigit(4)} />
-                  <MenuRow n={5} label="Game" onSelect={() => selectDigit(5)} />
-                  <MenuRow n={6} label="Timer" onSelect={() => selectDigit(6)} />
-                  <MenuRow n={7} label="History" onSelect={() => selectDigit(7)} />
-                  <MenuRow n={8} label="Undo" onSelect={() => selectDigit(8)} />
-                  <MenuRow n={9} label="App" onSelect={() => selectDigit(9)} />
-                  {ctx.fromHistory && (
-                    <MenuRow n="L" label="Back to latest clip" onSelect={backToLatest} />
-                  )}
-                </>
-              ) : menu === "sort" ? (
-                <>
-                  <MenuRow
-                    n={1}
-                    label={ctx.binds.g1Name || "G1"}
-                    hint={ctx.binds.g1}
-                    onSelect={() => selectDigit(1)}
-                  />
-                  <MenuRow
-                    n={2}
-                    label={ctx.binds.g2Name || "G2"}
-                    hint={ctx.binds.g2}
-                    onSelect={() => selectDigit(2)}
-                  />
-                  <MenuRow
-                    n={3}
-                    label={ctx.binds.g3Name || "G3"}
-                    hint={ctx.binds.g3}
-                    onSelect={() => selectDigit(3)}
-                  />
-                  <MenuRow n={0} label="Back" onSelect={() => selectDigit(0)} />
-                </>
-              ) : menu === "rate" ? (
-                <>
-                  {STAR_LABELS.map((stars, i) => (
+                  {rowDefs.map((r, i) => (
                     <MenuRow
                       key={i}
-                      n={i + 1}
-                      label={<span className="text-amber-400">{stars}</span>}
-                      onSelect={() => selectDigit(i + 1)}
+                      n={r.n}
+                      label={r.label}
+                      hint={r.hint}
+                      disabled={r.disabled}
+                      selected={i === rowSel}
+                      onSelect={r.onSelect}
                     />
                   ))}
-                  <MenuRow n={0} label="Back" onSelect={() => selectDigit(0)} />
-                </>
-              ) : menu === "label" ? (
-                <>
-                  {ctx.labelPresets.slice(0, 9).map((p, i) => (
-                    <MenuRow key={p} n={i + 1} label={p} onSelect={() => selectDigit(i + 1)} />
-                  ))}
-                  <MenuRow n={0} label="Custom…" onSelect={() => selectDigit(0)} />
-                </>
-              ) : menu === "describe" ? (
-                <>
-                  {ctx.descriptionPresets.slice(0, 9).map((p, i) => (
-                    <MenuRow key={p} n={i + 1} label={p} onSelect={() => selectDigit(i + 1)} />
-                  ))}
-                  <MenuRow n={0} label="Custom…" onSelect={() => selectDigit(0)} />
-                </>
-              ) : menu === "game" ? (
-                <>
-                  <MenuRow
-                    n={1}
-                    label={ctx.game ? `Keep "${ctx.game}"` : "Keep (no game detected)"}
-                    onSelect={() => selectDigit(1)}
-                  />
-                  <MenuRow n={2} label="Edit (type)" onSelect={() => selectDigit(2)} />
-                  <MenuRow
-                    n={3}
-                    label="Edit & remember"
-                    disabled={!ctx.exe}
-                    onSelect={() => selectDigit(3)}
-                  />
-                  <MenuRow n={0} label="Back" onSelect={() => selectDigit(0)} />
                 </>
               ) : menu === "history" ? (
                 <>
@@ -837,40 +1121,6 @@ export function OverlayApp() {
                   )}
                   <MenuRow n={0} label="Back" onSelect={() => selectDigit(0)} />
                 </>
-              ) : menu === "app" ? (
-                <>
-                  <MenuRow
-                    n={1}
-                    label={
-                      watchPaused === null
-                        ? "Loading watcher state…"
-                        : watchPaused
-                          ? "Resume watching"
-                          : "Pause watching"
-                    }
-                    disabled={watchPaused === null}
-                    onSelect={() => selectDigit(1)}
-                  />
-                  <MenuRow n={2} label="Open ClipShelf window" onSelect={() => selectDigit(2)} />
-                  <MenuRow n={3} label="Hide to tray" onSelect={() => selectDigit(3)} />
-                  <MenuRow n={4} label="Wipe current clip" onSelect={() => selectDigit(4)} />
-                  <MenuRow
-                    n={5}
-                    label={countUp.running ? "Stop count-up" : "Start count-up"}
-                    onSelect={() => selectDigit(5)}
-                  />
-                  <MenuRow n={0} label="Back" onSelect={() => selectDigit(0)} />
-                </>
-              ) : menu === "timer" ? (
-                <>
-                  <MenuRow
-                    n={1}
-                    label={countUp.running ? "Stop count-up" : "Start count-up"}
-                    onSelect={() => selectDigit(1)}
-                  />
-                  <MenuRow n={2} label="Reset" onSelect={() => selectDigit(2)} />
-                  <MenuRow n={0} label="Back" onSelect={() => selectDigit(0)} />
-                </>
               ) : (
                 // Typing mode
                 <div className="space-y-3 py-2">
@@ -895,7 +1145,9 @@ export function OverlayApp() {
             <div className="px-4 py-2 border-t border-white/10 text-[10px] text-white/40 text-center">
               {typeof menu === "object"
                 ? "Enter confirms · Esc cancels"
-                : "Esc closes · press the number"}
+                : menu === "root"
+                  ? "Esc closes · ◀ ▶ pick clip · ▲ ▼ + Enter or number"
+                  : "Esc closes · ▲ ▼ + Enter or number"}
             </div>
           </>
         )}

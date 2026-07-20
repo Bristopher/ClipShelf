@@ -840,6 +840,19 @@ export function SettingsForm({ config, onConfigChange }: SettingsFormProps) {
                 onCheckedChange={(v) => update({ overlay_typing_enabled: v })}
               />
             </div>
+            <div className="flex items-center justify-between">
+              <div className="pr-2">
+                <Label className="text-xs">WASD navigation</Label>
+                <p className="text-[10px] text-t-muted">
+                  Also use W/A/S/D as arrow keys in the overlay menu. Only
+                  active while the overlay is open — never during gameplay.
+                </p>
+              </div>
+              <Switch
+                checked={config.overlay_wasd_nav}
+                onCheckedChange={(v) => update({ overlay_wasd_nav: v })}
+              />
+            </div>
             <PresetsEditor
               label="Label presets"
               placeholder="e.g. Clutch"

@@ -56,6 +56,9 @@ drive everything:
 | 7 | Today's clip history — scroll with ↑↓, pick any clip and re-sort / re-rate / re-label it |
 | 8 | Undo the last move/rename |
 | 9 | App controls — pause watching, show/hide the main window, wipe, count-up |
+| ◀ ▶ | Thumbnail strip — flip through today's clips (Explorer thumbnails); every action targets the selected clip |
+| ▲ ▼ + Enter | Walk the menu rows and activate — full keyboard-only driving |
+| W/A/S/D | Optional arrow aliases (Settings toggle; only bound while the overlay is open) |
 
 Labels rename the file (`clip - clutch.mp4`), ratings and descriptions go
 into file properties, and everything lands in the history.

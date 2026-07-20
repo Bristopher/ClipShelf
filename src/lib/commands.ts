@@ -64,6 +64,8 @@ export const editHistoryGame = (path: string, game: string, exe: string | null, 
 // --- Overlay (Task 6) ---
 export const overlayGetContext = () => invoke<OverlayContext>("overlay_get_context");
 export const overlayHistory = () => invoke<OverlayHistoryRow[]>("overlay_history");
+/** Explorer thumbnail for a clip as a data URL (cached backend-side). */
+export const clipThumbnail = (path: string) => invoke<string>("clip_thumbnail", { path });
 export const overlaySetTarget = (path: string) => invoke<void>("overlay_set_target", { path });
 export const overlayClearTarget = () => invoke<void>("overlay_clear_target");
 export const overlaySort = (key: number) => invoke<void>("overlay_sort", { key });

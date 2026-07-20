@@ -15,6 +15,7 @@ mod sound;
 mod state;
 mod stats;
 mod theme;
+mod thumbs;
 mod timer;
 mod tray;
 mod updater;
@@ -708,6 +709,7 @@ pub fn run() {
             overlay::overlay_needs_label,
             keyhook::start_type_mode,
             keyhook::stop_type_mode,
+            thumbs::clip_thumbnail,
         ])
         .on_window_event(|window, event| {
             match event {

@@ -19,6 +19,9 @@ const WM_HOTKEY_RELOAD: u32 = WM_USER + 1;
 struct ControllerInner {
     base: Vec<(HotkeyAction, String)>,
     overlay_active: bool,
+    /// Whether the overlay temp keys also alias W/S/A/D to the four arrows
+    /// (opt-in Settings toggle; only meaningful while `overlay_active`).
+    overlay_wasd: bool,
 }
 
 /// Lets other threads swap the registered hotkeys at runtime. Cloned
@@ -52,13 +55,14 @@ impl HotkeyController {
     /// when inactive those are unregistered (base binds untouched). A no-op
     /// if the flag already matches, so re-opening/re-closing doesn't churn
     /// the base registrations.
-    pub fn set_overlay_keys(&self, active: bool) {
+    pub fn set_overlay_keys(&self, active: bool, wasd: bool) {
         // Same atomicity requirement as `reload` — see comment there.
         let mut inner = self.inner.lock().unwrap();
-        if inner.overlay_active == active {
+        if inner.overlay_active == active && inner.overlay_wasd == wasd {
             return;
         }
         inner.overlay_active = active;
+        inner.overlay_wasd = wasd;
         self.post(compose(&inner));
     }
 
@@ -77,17 +81,21 @@ impl HotkeyController {
 fn compose(inner: &ControllerInner) -> Vec<(HotkeyAction, String)> {
     let mut list = inner.base.clone();
     if inner.overlay_active {
-        list.extend(overlay_temp_bindings());
+        list.extend(overlay_temp_bindings(inner.overlay_wasd));
     }
     list
 }
 
 /// The temporary keys registered while the overlay is open: bare digits
 /// "1".."9" → `OverlayKey(1..=9)`, "0" → `OverlayKey(0)`, "escape" →
-/// `OverlayKey(10)` (the Esc sentinel that closes the overlay), and "up"/
-/// "down" → `OverlayKey(11)`/`OverlayKey(12)` (list navigation). Bare keys
-/// (no modifier) — they only exist while the overlay panel is up.
-pub fn overlay_temp_bindings() -> Vec<(HotkeyAction, String)> {
+/// `OverlayKey(10)` (the Esc sentinel that closes the overlay), arrows
+/// "up"/"down"/"left"/"right" → `OverlayKey(11..=14)` (menu + thumbnail-strip
+/// navigation), and "enter" → `OverlayKey(15)` (activate the highlighted
+/// row). With `wasd` (opt-in Settings toggle) W/S/A/D are also bound as
+/// aliases of the four arrows. Bare keys (no modifier) — they only exist
+/// while the overlay panel is up, so they never touch gameplay input outside
+/// the menu.
+pub fn overlay_temp_bindings(wasd: bool) -> Vec<(HotkeyAction, String)> {
     let mut v: Vec<(HotkeyAction, String)> = (1u8..=9)
         .map(|n| (HotkeyAction::OverlayKey(n), n.to_string()))
         .collect();
@@ -95,6 +103,15 @@ pub fn overlay_temp_bindings() -> Vec<(HotkeyAction, String)> {
     v.push((HotkeyAction::OverlayKey(10), "escape".to_string()));
     v.push((HotkeyAction::OverlayKey(11), "up".to_string()));
     v.push((HotkeyAction::OverlayKey(12), "down".to_string()));
+    v.push((HotkeyAction::OverlayKey(13), "left".to_string()));
+    v.push((HotkeyAction::OverlayKey(14), "right".to_string()));
+    v.push((HotkeyAction::OverlayKey(15), "enter".to_string()));
+    if wasd {
+        v.push((HotkeyAction::OverlayKey(11), "w".to_string()));
+        v.push((HotkeyAction::OverlayKey(12), "s".to_string()));
+        v.push((HotkeyAction::OverlayKey(13), "a".to_string()));
+        v.push((HotkeyAction::OverlayKey(14), "d".to_string()));
+    }
     v
 }
 
@@ -117,9 +134,10 @@ pub enum HotkeyAction {
     /// Show/hide the in-game overlay. User-configured global bind.
     OverlayToggle,
     /// A key pressed while the overlay is open. `1..=9` and `0` are the digit
-    /// selections; `10` is the Esc sentinel (closes the overlay); `11`/`12`
-    /// are Up/Down (list navigation). These are registered as bare temporary
-    /// hotkeys only while the overlay is up.
+    /// selections; `10` is the Esc sentinel (closes the overlay); `11..=14`
+    /// are Up/Down/Left/Right (menu + thumbnail-strip navigation, optionally
+    /// aliased to W/S/A/D); `15` is Enter (activate highlighted row). These
+    /// are registered as bare temporary hotkeys only while the overlay is up.
     OverlayKey(u8),
 }
 
@@ -245,9 +263,9 @@ pub fn key_name_to_vk(name: &str) -> Result<u32, String> {
         "end" => Ok(0x23),
         "pageup" => Ok(0x21),
         "pagedown" => Ok(0x22),
-        "arrowleft" => Ok(0x25),
+        "arrowleft" | "left" => Ok(0x25),
         "arrowup" | "up" => Ok(0x26),
-        "arrowright" => Ok(0x27),
+        "arrowright" | "right" => Ok(0x27),
         "arrowdown" | "down" => Ok(0x28),
         "`" => Ok(0xC0),
         "-" => Ok(0xBD),
@@ -399,6 +417,7 @@ pub fn spawn_hotkey_listener(
     let inner = Arc::new(Mutex::new(ControllerInner {
         base: initial_bindings.clone(),
         overlay_active: false,
+        overlay_wasd: false,
     }));
 
     // Use a sync channel so we can hand the listener thread's GetCurrentThreadId
@@ -555,16 +574,33 @@ mod tests {
 
     #[test]
     fn test_overlay_temp_bindings_shape() {
-        let b = overlay_temp_bindings();
-        // 1-9, 0, escape, up, down = 13 entries.
-        assert_eq!(b.len(), 13);
+        let b = overlay_temp_bindings(false);
+        // 1-9, 0, escape, up, down, left, right, enter = 16 entries.
+        assert_eq!(b.len(), 16);
         assert_eq!(b[0], (HotkeyAction::OverlayKey(1), "1".to_string()));
         assert_eq!(b[8], (HotkeyAction::OverlayKey(9), "9".to_string()));
         assert_eq!(b[9], (HotkeyAction::OverlayKey(0), "0".to_string()));
         assert_eq!(b[10], (HotkeyAction::OverlayKey(10), "escape".to_string()));
         assert_eq!(b[11], (HotkeyAction::OverlayKey(11), "up".to_string()));
         assert_eq!(b[12], (HotkeyAction::OverlayKey(12), "down".to_string()));
+        assert_eq!(b[13], (HotkeyAction::OverlayKey(13), "left".to_string()));
+        assert_eq!(b[14], (HotkeyAction::OverlayKey(14), "right".to_string()));
+        assert_eq!(b[15], (HotkeyAction::OverlayKey(15), "enter".to_string()));
         // Every temp binding must parse (else it can never register).
+        for (_, s) in &b {
+            assert!(parse_hotkey(s).is_ok(), "temp bind '{}' must parse", s);
+        }
+    }
+
+    #[test]
+    fn test_overlay_temp_bindings_wasd_aliases() {
+        let b = overlay_temp_bindings(true);
+        // Base 16 + W/S/A/D aliases = 20 entries, aliased to the arrow codes.
+        assert_eq!(b.len(), 20);
+        assert_eq!(b[16], (HotkeyAction::OverlayKey(11), "w".to_string()));
+        assert_eq!(b[17], (HotkeyAction::OverlayKey(12), "s".to_string()));
+        assert_eq!(b[18], (HotkeyAction::OverlayKey(13), "a".to_string()));
+        assert_eq!(b[19], (HotkeyAction::OverlayKey(14), "d".to_string()));
         for (_, s) in &b {
             assert!(parse_hotkey(s).is_ok(), "temp bind '{}' must parse", s);
         }

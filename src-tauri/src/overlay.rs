@@ -22,15 +22,27 @@ use crate::timer::CountUpCommand;
 /// Window label for the overlay webview.
 pub const LABEL: &str = "overlay";
 
+/// Logical size of the overlay window. Re-asserted on every `show` — see
+/// the comment there.
+const WIDTH: f64 = 420.0;
+const HEIGHT: f64 = 480.0;
+
 /// Pre-create the overlay window during startup. Called from `lib.rs`
 /// `setup` right after the settings/first-run windows are built.
 pub fn init(app: &AppHandle) {
     let window = match WebviewWindowBuilder::new(app, LABEL, WebviewUrl::App(std::path::PathBuf::new()))
         .title("ClipShelf — Overlay")
-        .inner_size(420.0, 480.0)
+        .inner_size(WIDTH, HEIGHT)
         .resizable(false)
         .decorations(false)
         .transparent(true)
+        // No DWM shadow: an undecorated transparent window with the shadow
+        // enabled renders an opaque white backdrop behind the (transparent)
+        // webview on Windows until the window is resized — the shadow path
+        // gives the window a system frame that defeats transparency
+        // (tauri#8308 / tauri#8632 / tao#72). The overlay draws its own
+        // shadow in CSS anyway.
+        .shadow(false)
         .always_on_top(true)
         .skip_taskbar(true)
         .focused(false)
@@ -87,6 +99,11 @@ pub fn show(app: &AppHandle) {
         log::error!("overlay: show called before window was created");
         return;
     };
+
+    // Re-assert size on every show — same workaround as the tray menu: some
+    // WebView2 versions leave a transparent window's surface opaque-white (or
+    // drifted a few pixels) after hide/show cycles until a resize lands.
+    let _ = window.set_size(tauri::LogicalSize::new(WIDTH, HEIGHT));
 
     if let Some((x, y)) = target_position(&window) {
         let _ = window.set_position(PhysicalPosition::new(x, y));
@@ -196,9 +213,8 @@ pub fn open(app: &AppHandle, controller: &HotkeyController, state: &AppState) {
     }
 
     show(app);
-    controller.set_overlay_keys(true);
 
-    let (filename, game) = {
+    let (filename, game, wasd) = {
         let s = state.lock().unwrap();
         let filename = s
             .current_file
@@ -210,8 +226,9 @@ pub fn open(app: &AppHandle, controller: &HotkeyController, state: &AppState) {
             .current_file
             .as_ref()
             .and_then(|f| s.clip_games.get(&f.path).cloned());
-        (filename, game)
+        (filename, game, s.config.overlay_wasd_nav)
     };
+    controller.set_overlay_keys(true, wasd);
 
     let _ = app.emit(
         "overlay-open",
@@ -224,7 +241,7 @@ pub fn open(app: &AppHandle, controller: &HotkeyController, state: &AppState) {
 /// the temp keys are ALWAYS released whenever the overlay goes away.
 pub fn close(app: &AppHandle, controller: &HotkeyController) {
     hide(app);
-    controller.set_overlay_keys(false);
+    controller.set_overlay_keys(false, false);
     // Closing the overlay ALWAYS ends type mode — the LL keyboard hook must
     // never keep swallowing the game's keystrokes after the overlay is gone.
     crate::keyhook::stop();

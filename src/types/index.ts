@@ -108,6 +108,8 @@ export interface AppConfig {
   overlay_enabled: boolean;
   overlay_bind: string;
   overlay_typing_enabled: boolean;
+  /** Bind W/S/A/D as arrow aliases while the overlay is open (opt-in). */
+  overlay_wasd_nav: boolean;
   label_presets: string[];
   description_presets: string[];
 }
