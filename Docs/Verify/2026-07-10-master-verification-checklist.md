@@ -1,6 +1,6 @@
 # Master Verification Checklist (2026-07-10)
 
-**Updated:** 2026-07-18 (reworks §20 popup-free updates + webview-unlock wait; adds §22 hold-to-click-through)
+**Updated:** 2026-07-19 (adds §23 overlay command center; 07-18 reworked §20 popup-free updates + webview-unlock wait, added §22 hold-to-click-through)
 
 Everything code-verified but not yet exercised live, across three batches:
 the 2026-07-02 QoL batch (undo, pause, clickable log, autostart, window
@@ -553,3 +553,53 @@ items:
 - [ ] Same carve-out works at non-100% display scaling (rect is DPI-scaled)
 - [ ] Windows Settings → Apps: a fresh install from the next release shows
       publisher "Bristopher" instead of the raw com.cbuzi.gkey-mover-v2 ID
+
+## 23. Overlay command center (history rolodex, undo, app controls)
+
+Shipped 2026-07-19, commits 9b2b011..HEAD (spec
+`Docs/specs/2026-07-19-overlay-command-center-design.md`, plan
+`Docs/superpowers/plans/2026-07-19-overlay-command-center.md`). The
+Shift+F1 overlay root grew 6 → 9 rows: 6 Timer is now a submenu
+(start/stop, reset, live ⏱ mm:ss header), 7 History is a MicGuard-mixer
+rolodex of today's clips (7 visible, digits pick, ↑↓ scroll with dots,
+missing files dimmed), 8 Undo fires the Ctrl+Z stack in place, 9 App
+(pause/resume watching, open main window WITHOUT activation, hide to
+tray, wipe, count-up). Picking a history row sets a backend target clip —
+`acting_clip` prefers it, so Sort/Rate/Label/Describe/Game all operate on
+that clip; targeted sorts route through the drop move core (undo +
+history + sounds intact); the header shows "▸ name · from history" with a
+Back-to-latest row. Target auto-clears on overlay close and falls back
+with a warn flash if the file vanishes. Arrows are ephemeral overlay-only
+hotkeys (never WASD).
+
+**Automated coverage** — 118 cargo tests (new: resolve_acting ×3,
+history_rows ×3 incl. same-second tie-break, temp-bindings shape,
+CountUp Reset), 3 vitest tests (rolodex viewport; vitest bootstrapped
+this change), zero warnings, builds clean. Per-task review with fix
+waves: stale-target double-press race, same-second tie-break, unpinned
+jsdom, pause-toggle race, false vanished-target warn on reopen — all
+fixed. Human items:
+
+- [ ] Overlay root shows 9 rows; digits 1-9 all respond; 0/Esc conventions
+      unchanged in every submenu
+- [ ] History (7): today's clips listed newest-first with game/time hints;
+      ↑↓ scrolls past 7 rows with ▲▼ dots; digits pick the VISIBLE row
+- [ ] Pick an older clip → header shows "▸ name · from history"; Rate/
+      Label/Describe/Game act on THAT clip (check file properties /
+      rename); Sort moves THAT file to the G-key folder and Ctrl+Z
+      restores it
+- [ ] "Back to latest clip" row resets the header; closing and reopening
+      the overlay also resets to latest WITHOUT a "clip no longer exists"
+      warning
+- [ ] Delete a listed clip in Explorer, then pick it: row is dimmed after
+      refresh / pick fails gracefully with an error flash
+- [ ] Undo (8): flashes result and stays open; works repeatedly
+- [ ] App (9): pause/resume reflects real watcher state (first row briefly
+      "Loading watcher state…"); "Open ClipShelf window" over a fullscreen
+      game does NOT minimize or unfocus the game; hide-to-tray, wipe, and
+      count-up rows work
+- [ ] Timer (6): start/stop + reset work; ⏱ mm:ss ticks live in the
+      overlay header while running
+- [ ] In an exclusive-fullscreen game: the expanded overlay still never
+      steals focus; arrow keys only act while the overlay is open (game
+      arrow binds unaffected after close)

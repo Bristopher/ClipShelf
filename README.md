@@ -52,7 +52,10 @@ drive everything:
 | 2 | Star-rate 1–5 — real Explorer ★ ratings |
 | 3 / 4 | Label / describe via preset chips or free typing (keystrokes never reach the game) |
 | 5 | Fix the detected game (+ remember) |
-| 6 | Stopwatch |
+| 6 | Stopwatch (start/stop, reset, live readout in the header) |
+| 7 | Today's clip history — scroll with ↑↓, pick any clip and re-sort / re-rate / re-label it |
+| 8 | Undo the last move/rename |
+| 9 | App controls — pause watching, show/hide the main window, wipe, count-up |
 
 Labels rename the file (`clip - clutch.mp4`), ratings and descriptions go
 into file properties, and everything lands in the history.
