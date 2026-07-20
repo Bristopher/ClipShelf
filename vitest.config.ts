@@ -6,7 +6,10 @@ export default defineConfig({
   plugins: [react()],
   test: {
     globals: true,
-    environment: "jsdom",
+    // Default "node" environment — current tests are pure functions. Add
+    // jsdom as a PINNED devDependency before switching this if DOM tests
+    // ever land; an unpinned environment resolves against stray ancestor
+    // node_modules and breaks clean checkouts.
   },
   resolve: {
     alias: {
