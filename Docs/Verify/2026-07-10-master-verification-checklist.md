@@ -1,6 +1,6 @@
 # Master Verification Checklist (2026-07-10)
 
-**Updated:** 2026-07-20 (adds §24 overlay backdrop fix + thumbnail strip + arrow/WASD/Enter nav; 07-19 added §23 overlay command center)
+**Updated:** 2026-07-21 (adds §25 count-up default bind + per-hotkey/master toggles; 07-20 added §24 overlay backdrop fix + thumbnail strip + nav)
 
 Everything code-verified but not yet exercised live, across three batches:
 the 2026-07-02 QoL batch (undo, pause, clickable log, autostart, window
@@ -646,3 +646,27 @@ WASD aliases, config default), 8 vitest, builds clean. Human items:
       gets them back instantly; typing mode still types w/a/s/d characters
 - [ ] Strip mouse clicks select/retarget; dead (deleted) clips render
       dimmed and can be scrolled past but never targeted
+
+## 25. Count-up default bind + per-hotkey and master toggles
+
+Shipped 2026-07-21. Count-up stopwatch now defaults to **Ctrl+Shift+B**
+(was unset); configs saved with the old empty value are migrated on load.
+Settings → Hotkeys: every bind row (save-clip, G1-G3, rename, count-up,
+undo) gains a small on/off switch (`disabled_binds` by field name — a
+disabled bind never registers and is excluded from conflict detection),
+and the section header gains a master switch (`hotkeys_disabled`) that
+unregisters EVERY global hotkey including the overlay toggle. The master
+flag is independent of the per-bind list, so flipping it off and back on
+restores exactly which individual binds were disabled. Human items:
+
+- [ ] Fresh look at Settings → Hotkeys: count-up shows ctrl+shift+B and
+      Ctrl+Shift+B starts/resets the stopwatch after Save
+- [ ] Toggle one bind (e.g. G2) off, Save: that key stops working, the
+      others keep working; its row shows dimmed input and no conflict note
+- [ ] Master switch off, Save: NO hotkey works (G-keys, rename, undo,
+      count-up, save-clip probe, Shift+F1 overlay); "all hotkeys off"
+      badge shows
+- [ ] Master back on, Save: everything returns EXCEPT the binds you had
+      individually disabled (remembered state)
+- [ ] Existing config upgrade: after this build, a config that had no
+      count-up bind gets Ctrl+Shift+B automatically (check Settings)

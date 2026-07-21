@@ -105,6 +105,10 @@ export interface AppConfig {
   write_file_properties: boolean;
   day_rollover_hour: number;
   game_overrides: { exe: string; name: string }[];
+  /** Bind-field names (e.g. "count_up_bind") individually toggled off. */
+  disabled_binds: string[];
+  /** Master kill-switch: no global hotkeys at all (per-bind list preserved). */
+  hotkeys_disabled: boolean;
   overlay_enabled: boolean;
   overlay_bind: string;
   overlay_typing_enabled: boolean;

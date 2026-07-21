@@ -282,29 +282,46 @@ pub fn key_name_to_vk(name: &str) -> Result<u32, String> {
     }
 }
 
-/// Build the hotkey-binding list from a config snapshot. Empty/unset
-/// binds are skipped so we don't attempt to register zero-length keys.
+/// Build the hotkey-binding list from a config snapshot. Empty/unset binds
+/// are skipped so we don't attempt to register zero-length keys; binds
+/// listed in `disabled_binds` are skipped individually, and the
+/// `hotkeys_disabled` master switch suppresses the whole list (leaving
+/// `disabled_binds` untouched, so flipping the master back restores the
+/// exact per-bind states).
 pub fn bindings_from_config(config: &crate::config::AppConfig) -> Vec<(HotkeyAction, String)> {
-    let mut bindings = vec![
-        (HotkeyAction::MoveG1, config.g1_bind.clone()),
-        (HotkeyAction::MoveG2, config.g2_bind.clone()),
-        (HotkeyAction::MoveG3, config.g3_bind.clone()),
-        (HotkeyAction::Rename, config.rename_bind.clone()),
-        (
+    if config.hotkeys_disabled {
+        return Vec::new();
+    }
+    let on = |field: &str| !config.disabled_binds.iter().any(|d| d == field);
+    let mut bindings: Vec<(HotkeyAction, String)> = Vec::new();
+    if on("g1_bind") {
+        bindings.push((HotkeyAction::MoveG1, config.g1_bind.clone()));
+    }
+    if on("g2_bind") {
+        bindings.push((HotkeyAction::MoveG2, config.g2_bind.clone()));
+    }
+    if on("g3_bind") {
+        bindings.push((HotkeyAction::MoveG3, config.g3_bind.clone()));
+    }
+    if on("rename_bind") {
+        bindings.push((HotkeyAction::Rename, config.rename_bind.clone()));
+    }
+    if on("restart_watcher_bind") {
+        bindings.push((
             HotkeyAction::RestartWatcher,
             config.restart_watcher_bind.clone(),
-        ),
-    ];
-    if !config.save_clip_bind.is_empty() {
+        ));
+    }
+    if on("save_clip_bind") {
         bindings.push((HotkeyAction::SaveClipHealthCheck, config.save_clip_bind.clone()));
     }
-    if !config.count_up_bind.is_empty() {
+    if on("count_up_bind") {
         bindings.push((HotkeyAction::CountUpToggle, config.count_up_bind.clone()));
     }
-    if !config.undo_bind.is_empty() {
+    if on("undo_bind") {
         bindings.push((HotkeyAction::Undo, config.undo_bind.clone()));
     }
-    if config.overlay_enabled && !config.overlay_bind.is_empty() {
+    if config.overlay_enabled && on("overlay_bind") {
         bindings.push((HotkeyAction::OverlayToggle, config.overlay_bind.clone()));
     }
     bindings.into_iter().filter(|(_, s)| !s.is_empty()).collect()
@@ -620,5 +637,38 @@ mod tests {
         cfg.overlay_enabled = false;
         let binds = bindings_from_config(&cfg);
         assert!(!binds.iter().any(|(a, _)| *a == HotkeyAction::OverlayToggle));
+    }
+
+    #[test]
+    fn test_bindings_from_config_per_bind_disable() {
+        let mut cfg = crate::config::AppConfig::default();
+        cfg.disabled_binds = vec!["g2_bind".to_string(), "count_up_bind".to_string()];
+        let binds = bindings_from_config(&cfg);
+        assert!(binds.iter().any(|(a, _)| *a == HotkeyAction::MoveG1));
+        assert!(!binds.iter().any(|(a, _)| *a == HotkeyAction::MoveG2));
+        assert!(binds.iter().any(|(a, _)| *a == HotkeyAction::MoveG3));
+        assert!(!binds.iter().any(|(a, _)| *a == HotkeyAction::CountUpToggle));
+    }
+
+    #[test]
+    fn test_bindings_from_config_master_off_ignores_per_bind_state() {
+        let mut cfg = crate::config::AppConfig::default();
+        cfg.disabled_binds = vec!["g2_bind".to_string()];
+        cfg.hotkeys_disabled = true;
+        assert!(bindings_from_config(&cfg).is_empty());
+        // Flipping the master back must restore exactly the per-bind states.
+        cfg.hotkeys_disabled = false;
+        let binds = bindings_from_config(&cfg);
+        assert!(binds.iter().any(|(a, _)| *a == HotkeyAction::MoveG1));
+        assert!(!binds.iter().any(|(a, _)| *a == HotkeyAction::MoveG2));
+    }
+
+    #[test]
+    fn test_count_up_default_bind_registers() {
+        let cfg = crate::config::AppConfig::default();
+        let binds = bindings_from_config(&cfg);
+        assert!(binds
+            .iter()
+            .any(|(a, s)| *a == HotkeyAction::CountUpToggle && s == "ctrl+shift+B"));
     }
 }

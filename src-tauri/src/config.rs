@@ -35,7 +35,7 @@ fn default_save_clip_bind() -> String { "".to_string() }
 fn default_timer_flash_enabled() -> bool { true }
 fn default_save_clip_health_check_timeout_secs() -> u32 { 5 }
 fn default_timer_flash_theme_id() -> Option<String> { None }
-fn default_count_up_bind() -> String { "".to_string() }
+fn default_count_up_bind() -> String { "ctrl+shift+B".to_string() }
 fn default_small_file_warn_mb() -> f64 { 6.5 }
 fn default_undo_bind() -> String { "".to_string() }
 fn default_autostart_enabled() -> bool { false }
@@ -178,10 +178,24 @@ pub struct AppConfig {
     pub timer_flash_theme_id: Option<String>,
 
     /// Hotkey for the count-up stopwatch. First press starts at 0, second
-    /// press resets to 0 and stops, third press starts again. Empty = no
-    /// hotkey registered.
+    /// press resets to 0 and stops, third press starts again. Empty values
+    /// are migrated to the default on load — use `disabled_binds` to turn
+    /// the hotkey off instead of clearing it.
     #[serde(default = "default_count_up_bind")]
     pub count_up_bind: String,
+
+    /// Bind-field names (e.g. "count_up_bind") whose global hotkey is
+    /// individually toggled off in Settings. Kept as a list so the master
+    /// toggle below can flip everything off and back WITHOUT losing which
+    /// individual binds the user had disabled.
+    #[serde(default)]
+    pub disabled_binds: Vec<String>,
+
+    /// Master hotkey kill-switch: when true, NO global hotkeys register at
+    /// all. Independent of `disabled_binds`, so toggling this back on
+    /// restores exactly the per-bind states from before.
+    #[serde(default)]
+    pub hotkeys_disabled: bool,
 
     /// Clips smaller than this (MB) get a "possible black screen" warning +
     /// error sound. Depends on bitrate and replay-buffer length, so it's
@@ -321,6 +335,8 @@ impl Default for AppConfig {
             save_clip_health_check_timeout_secs: default_save_clip_health_check_timeout_secs(),
             timer_flash_theme_id: default_timer_flash_theme_id(),
             count_up_bind: default_count_up_bind(),
+            disabled_binds: Vec::new(),
+            hotkeys_disabled: false,
             small_file_warn_mb: default_small_file_warn_mb(),
             undo_bind: default_undo_bind(),
             autostart_enabled: default_autostart_enabled(),
@@ -360,7 +376,15 @@ impl AppConfig {
             return Ok(Self::default());
         }
         let contents = std::fs::read_to_string(path)?;
-        let config: Self = toml::from_str(&contents)?;
+        let mut config: Self = toml::from_str(&contents)?;
+        // Migration (2026-07-20): count-up used to default to "" (= not
+        // registered); it now defaults to Ctrl+Shift+B, and turning a
+        // hotkey off is done via `disabled_binds` instead of clearing the
+        // combo. Configs saved before this carry the old empty string —
+        // upgrade them in place.
+        if config.count_up_bind.trim().is_empty() {
+            config.count_up_bind = default_count_up_bind();
+        }
         Ok(config)
     }
 
@@ -650,6 +674,28 @@ timer_duration_ms = 45000
         cfg.remember_game_override("cs2", "Counter-Strike 2");
         assert_eq!(cfg.game_overrides.len(), 1);
         assert_eq!(cfg.game_overrides[0].name, "Counter-Strike 2");
+    }
+
+    #[test]
+    fn test_hotkey_toggle_defaults_and_count_up_migration() {
+        let cfg = AppConfig::default();
+        assert_eq!(cfg.count_up_bind, "ctrl+shift+B");
+        assert!(cfg.disabled_binds.is_empty());
+        assert!(!cfg.hotkeys_disabled);
+
+        // Pre-migration configs stored "" for "no count-up hotkey" — load
+        // must upgrade that to the new default (disabling now goes through
+        // disabled_binds instead).
+        let tmp = NamedTempFile::new().expect("failed to create temp file");
+        let mut original = AppConfig::default();
+        original.count_up_bind = String::new();
+        original.disabled_binds = vec!["g2_bind".to_string()];
+        original.hotkeys_disabled = true;
+        original.save_to(tmp.path()).expect("save_to failed");
+        let loaded = AppConfig::load_from(tmp.path()).expect("load_from failed");
+        assert_eq!(loaded.count_up_bind, "ctrl+shift+B");
+        assert_eq!(loaded.disabled_binds, vec!["g2_bind".to_string()]);
+        assert!(loaded.hotkeys_disabled);
     }
 
     #[test]

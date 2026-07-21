@@ -183,16 +183,19 @@ export function SettingsForm({ config, onConfigChange }: SettingsFormProps) {
   }, []);
 
   // Keybind conflict detection: same combo bound to two actions means one of
-  // them silently loses at RegisterHotKey time. Flag it inline.
+  // them silently loses at RegisterHotKey time. Flag it inline. Disabled
+  // binds don't register, so they can't conflict.
   const bindConflicts = useMemo(() => {
     const byCombo = new Map<string, string[]>();
     for (const [field, label] of BIND_FIELDS) {
+      if (config.disabled_binds.includes(field)) continue;
       const v = (config[field] || "").trim().toLowerCase();
       if (!v) continue;
       byCombo.set(v, [...(byCombo.get(v) ?? []), label]);
     }
     const conflicts = new Map<BindField, string[]>();
     for (const [field] of BIND_FIELDS) {
+      if (config.disabled_binds.includes(field)) continue;
       const v = (config[field] || "").trim().toLowerCase();
       if (!v) continue;
       const users = byCombo.get(v) ?? [];
@@ -221,6 +224,29 @@ export function SettingsForm({ config, onConfigChange }: SettingsFormProps) {
   const update = (partial: Partial<AppConfig>) => {
     onConfigChange({ ...config, ...partial });
   };
+
+  // Per-bind enable/disable. The list survives the master toggle untouched,
+  // so turning everything off and back on restores exactly these states.
+  const bindOff = (field: BindField) => config.disabled_binds.includes(field);
+  const setBindOff = (field: BindField, off: boolean) =>
+    update({
+      disabled_binds: off
+        ? [...config.disabled_binds, field]
+        : config.disabled_binds.filter((f) => f !== field),
+    });
+
+  const bindToggle = (field: BindField) => (
+    <Tip
+      text={bindOff(field) ? "Hotkey off — toggle to re-enable" : "Hotkey on — toggle to disable"}
+      align="right"
+    >
+      <Switch
+        checked={!bindOff(field)}
+        onCheckedChange={(v) => setBindOff(field, !v)}
+        className="scale-75"
+      />
+    </Tip>
+  );
 
   const pickFolder = async (field: keyof AppConfig) => {
     const selected = await open({ directory: true });
@@ -387,13 +413,45 @@ export function SettingsForm({ config, onConfigChange }: SettingsFormProps) {
       <Separator />
 
       <section className="space-y-3">
-        <h3 className="text-sm font-semibold">Hotkeys</h3>
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold">Hotkeys</h3>
+          <div className="flex items-center gap-2">
+            {config.hotkeys_disabled && (
+              <span className="text-[10px] font-medium text-amber-400">
+                all hotkeys off
+              </span>
+            )}
+            <Tip
+              text={
+                config.hotkeys_disabled
+                  ? "Re-enable global hotkeys"
+                  : "Disable ALL global hotkeys (incl. the overlay toggle)"
+              }
+              sub={
+                config.hotkeys_disabled
+                  ? "Individual toggles are remembered"
+                  : undefined
+              }
+              align="right"
+            >
+              <Switch
+                checked={!config.hotkeys_disabled}
+                onCheckedChange={(v) => update({ hotkeys_disabled: !v })}
+              />
+            </Tip>
+          </div>
+        </div>
         <div className="space-y-1">
-          <Label className="text-xs">Capture app save-clip hotkey</Label>
-          <KeybindInput
-            value={config.save_clip_bind}
-            onChange={(v) => update({ save_clip_bind: v })}
-          />
+          <div className="flex items-center justify-between">
+            <Label className="text-xs">Capture app save-clip hotkey</Label>
+            {bindToggle("save_clip_bind")}
+          </div>
+          <div className={bindOff("save_clip_bind") ? "opacity-50" : ""}>
+            <KeybindInput
+              value={config.save_clip_bind}
+              onChange={(v) => update({ save_clip_bind: v })}
+            />
+          </div>
           {conflictNote("save_clip_bind")}
           <p className="text-[10px] text-t-muted">
             Whatever key you press in OBS / ShadowPlay to save a clip. Used as
@@ -435,32 +493,47 @@ export function SettingsForm({ config, onConfigChange }: SettingsFormProps) {
           ] as const
         ).map(([field, label]) => (
           <div key={field} className="space-y-1">
-            <Label className="text-xs">{label}</Label>
-            <KeybindInput
-              value={config[field]}
-              onChange={(v) => update({ [field]: v })}
-            />
+            <div className="flex items-center justify-between">
+              <Label className="text-xs">{label}</Label>
+              {bindToggle(field)}
+            </div>
+            <div className={bindOff(field) ? "opacity-50" : ""}>
+              <KeybindInput
+                value={config[field]}
+                onChange={(v) => update({ [field]: v })}
+              />
+            </div>
             {conflictNote(field)}
           </div>
         ))}
         <div className="space-y-1">
-          <Label className="text-xs">Count-up stopwatch</Label>
-          <KeybindInput
-            value={config.count_up_bind}
-            onChange={(v) => update({ count_up_bind: v })}
-          />
+          <div className="flex items-center justify-between">
+            <Label className="text-xs">Count-up stopwatch</Label>
+            {bindToggle("count_up_bind")}
+          </div>
+          <div className={bindOff("count_up_bind") ? "opacity-50" : ""}>
+            <KeybindInput
+              value={config.count_up_bind}
+              onChange={(v) => update({ count_up_bind: v })}
+            />
+          </div>
           {conflictNote("count_up_bind")}
           <p className="text-[10px] text-t-muted">
             Press once to start counting up from 0. Press again to reset and
-            stop. Press again to start over.
+            stop. Press again to start over. Default: Ctrl+Shift+B.
           </p>
         </div>
         <div className="space-y-1">
-          <Label className="text-xs">Undo last move/rename</Label>
-          <KeybindInput
-            value={config.undo_bind}
-            onChange={(v) => update({ undo_bind: v })}
-          />
+          <div className="flex items-center justify-between">
+            <Label className="text-xs">Undo last move/rename</Label>
+            {bindToggle("undo_bind")}
+          </div>
+          <div className={bindOff("undo_bind") ? "opacity-50" : ""}>
+            <KeybindInput
+              value={config.undo_bind}
+              onChange={(v) => update({ undo_bind: v })}
+            />
+          </div>
           {conflictNote("undo_bind")}
           <p className="text-[10px] text-t-muted">
             Puts the last clip back where it was (works for mis-pressed
