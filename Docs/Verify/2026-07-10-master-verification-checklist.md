@@ -1,6 +1,6 @@
 # Master Verification Checklist (2026-07-10)
 
-**Updated:** 2026-07-21 (adds §25 count-up default bind + per-hotkey/master toggles; 07-20 added §24 overlay backdrop fix + thumbnail strip + nav)
+**Updated:** 2026-07-25 (adds §26 keyboard-hostage fixes: exclusive-fullscreen guard, keyhook watchdog, idle auto-close, text caps; 07-21 added §25)
 
 Everything code-verified but not yet exercised live, across three batches:
 the 2026-07-02 QoL batch (undo, pause, clickable log, autostart, window
@@ -670,3 +670,41 @@ restores exactly which individual binds were disabled. Human items:
       individually disabled (remembered state)
 - [ ] Existing config upgrade: after this build, a config that had no
       count-up bind gets Ctrl+Shift+B automatically (check Settings)
+
+## 26. Keyboard-hostage fixes (invisible overlay over exclusive fullscreen)
+
+Shipped 2026-07-25 after a live incident: Shift+F1 opened the overlay over
+EXCLUSIVE-fullscreen Rainbow Six (DWM bypassed — overlay can't render
+there), gameplay digit presses blindly walked Game → Edit, the LL typing
+hook then swallowed all input, and Enter committed a 500-char keyboard
+mash as a REMEMBERED game name. Five independent guards added:
+
+1. `open()` refuses to open over exclusive fullscreen
+   (`SHQueryUserNotificationState` == QUNS_RUNNING_D3D_FULL_SCREEN) and
+   logs why; borderless/windowed games unaffected.
+2. keyhook watchdog thread: force-releases type mode (~750ms) if the
+   overlay window isn't visible while the hook is armed, or after 90s of
+   silence; logs "Typing mode force-released".
+3. `start_type_mode` refuses when the overlay window isn't visible;
+   `hide()` always stops the hook.
+4. Overlay dead-man auto-close after 45s with no keypress — temp hotkeys
+   (digits/arrows/Enter/Esc) can't stay registered forever.
+5. Length caps: label/game 80 chars, description 300 (blind-mash guard).
+
+Also: overlay now opens on the FOREGROUND window's monitor (was: monitor
+under the mouse cursor — a cursor parked on another screen made the
+overlay open out of sight). Human items:
+
+- [ ] R6 (or any game) in EXCLUSIVE fullscreen: Shift+F1 does NOT open the
+      overlay; event log explains; game input completely unaffected
+- [ ] Same game in borderless: overlay opens and works as before
+- [ ] Two monitors, cursor on the other screen: Shift+F1 opens the overlay
+      on the GAME's monitor
+- [ ] Open overlay, walk away 45s: it closes itself; digits/arrows work
+      normally in other apps afterward
+- [ ] Enter typing mode, wait 90s without typing: keyboard frees itself,
+      log shows "Typing mode force-released"
+- [ ] Overlay label/game typing: >80 chars is rejected with a red flash
+      instead of committing
+- [ ] Repaired data: the 2026-07-25 R6 clips show game "Rainbow Six"
+      again in History; no garbage `game_overrides` entry in Settings

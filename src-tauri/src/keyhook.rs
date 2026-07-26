@@ -34,10 +34,10 @@
 //! drop the event silently.
 
 use std::ptr;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Once, OnceLock};
 
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::state::AppState;
 
@@ -57,6 +57,25 @@ static APP: OnceLock<AppHandle> = OnceLock::new();
 
 /// Guards the one-time spawn of the hook thread.
 static THREAD_SPAWN: Once = Once::new();
+
+/// Guards the one-time spawn of the watchdog thread.
+static WATCHDOG_SPAWN: Once = Once::new();
+
+/// Wall-clock millis (UNIX epoch) of the last keystroke the hook processed
+/// while ACTIVE, plus the arm time from `start`. The watchdog uses it to
+/// force-release a type mode nobody is typing into.
+static LAST_KEY_MS: AtomicU64 = AtomicU64::new(0);
+
+/// Watchdog: force-release type mode after this much keyboard silence. Long
+/// enough for "thinking of a name", far too short to hold a keyboard hostage.
+const IDLE_RELEASE_MS: u64 = 90_000;
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
 
 /// True once the LL keyboard hook actually installed. Set from the first
 /// `start`'s bounded wait on the hook thread's ack. If it stays false the hook
@@ -114,8 +133,79 @@ pub fn start(app: AppHandle) -> Result<(), String> {
         return Err("keyboard hook is not installed".to_string());
     }
 
+    // Never arm the hook when the overlay window isn't actually on screen —
+    // typing with no visible UI is a keyboard trap (invisible overlay over an
+    // exclusive-fullscreen game swallowing gameplay input).
+    if let Some(app) = APP.get() {
+        let visible = app
+            .get_webview_window(crate::overlay::LABEL)
+            .and_then(|w| w.is_visible().ok())
+            .unwrap_or(false);
+        if !visible {
+            return Err("overlay window is not visible".to_string());
+        }
+    }
+
+    // Watchdog thread: force-releases type mode if the overlay window
+    // disappears while the hook is armed, or after prolonged silence.
+    WATCHDOG_SPAWN.call_once(|| {
+        let _ = std::thread::Builder::new()
+            .name("gkey-keyhook-watchdog".into())
+            .spawn(watchdog_main);
+    });
+
+    LAST_KEY_MS.store(now_ms(), Ordering::SeqCst);
     ACTIVE.store(true, Ordering::SeqCst);
     Ok(())
+}
+
+/// The watchdog: while type mode is ACTIVE, verify twice a second that the
+/// overlay window is still visible and that keys arrived within
+/// `IDLE_RELEASE_MS`. On violation, release the hook, poke the frontend out
+/// of its typing state, and drop a warning in the event log. This is the
+/// last line of defense — every legitimate path (Esc hatch, commit, cancel,
+/// overlay close/hide) already stops the hook itself.
+fn watchdog_main() {
+    let mut invisible_strikes = 0u32;
+    loop {
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        if !ACTIVE.load(Ordering::SeqCst) {
+            invisible_strikes = 0;
+            continue;
+        }
+        let Some(app) = APP.get() else { continue };
+        let visible = app
+            .get_webview_window(crate::overlay::LABEL)
+            .and_then(|w| w.is_visible().ok())
+            .unwrap_or(false);
+        invisible_strikes = if visible { 0 } else { invisible_strikes + 1 };
+        let idle =
+            now_ms().saturating_sub(LAST_KEY_MS.load(Ordering::SeqCst)) > IDLE_RELEASE_MS;
+
+        // 3 strikes = ~750ms hidden — enough to skip transient hide/show races.
+        if invisible_strikes >= 3 || idle {
+            let reason = if idle {
+                "no keystrokes for 90s"
+            } else {
+                "overlay window is not visible"
+            };
+            log::warn!("keyhook watchdog: force-releasing type mode ({reason})");
+            stop();
+            invisible_strikes = 0;
+            // Kick the frontend out of its typing UI state too.
+            emit(serde_json::json!({ "kind": "esc" }));
+            if let Some(state) = app.try_state::<AppState>() {
+                if let Ok(mut s) = state.lock() {
+                    let entry = s.logger.log(
+                        crate::events::LogLevel::Warning,
+                        format!("Typing mode force-released ({reason})"),
+                        crate::events::LogCategory::System,
+                    );
+                    let _ = app.emit("log-entry", &entry);
+                }
+            }
+        }
+    }
 }
 
 /// Disable type mode. Idempotent — safe to call when type mode was never
@@ -222,6 +312,9 @@ unsafe extern "system" fn hook_proc(
     let kb = &*(lparam as *const KBDLLHOOKSTRUCT);
     let vk = kb.vkCode;
     let msg = wparam as u32;
+
+    // Feed the idle watchdog. A single atomic store — safe in the LL path.
+    LAST_KEY_MS.store(now_ms(), Ordering::SeqCst);
 
     match msg {
         WM_KEYDOWN | WM_SYSKEYDOWN => {

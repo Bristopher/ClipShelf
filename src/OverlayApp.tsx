@@ -247,6 +247,17 @@ export function OverlayApp() {
     ctxRef.current = ctx;
   }, [ctx]);
 
+  // Dead-man auto-close: if the overlay sits open with zero interaction
+  // (e.g. it opened somewhere the user can't see it), close it instead of
+  // leaving digits/arrows/Enter registered as global hotkeys forever.
+  const idleCloseTimer = useRef<number | null>(null);
+  const armIdleClose = useCallback(() => {
+    if (idleCloseTimer.current) window.clearTimeout(idleCloseTimer.current);
+    idleCloseTimer.current = window.setTimeout(() => {
+      hideOverlay().catch(() => {});
+    }, 45_000);
+  }, []);
+
   const flashTimer = useRef<number | null>(null);
   const showFlash = useCallback((kind: "success" | "error" | "warn", text: string) => {
     // Sync the ref immediately — the next overlay-key event can arrive before
@@ -313,6 +324,10 @@ export function OverlayApp() {
       window.clearTimeout(flashTimer.current);
       flashTimer.current = null;
     }
+    if (idleCloseTimer.current) {
+      window.clearTimeout(idleCloseTimer.current);
+      idleCloseTimer.current = null;
+    }
     stopTypeMode().catch(() => {});
   }, []);
 
@@ -340,6 +355,7 @@ export function OverlayApp() {
     refreshStripRef.current();
     const unOpen = listen("overlay-open", () => {
       resetToRoot();
+      armIdleClose();
       fetchContext();
       refreshStripRef.current();
     });
@@ -579,6 +595,7 @@ export function OverlayApp() {
   // reads the current menu/buffer through refs so it never goes stale.
   useEffect(() => {
     const un = listen<OverlayTypeEvent>("overlay-type", (e) => {
+      armIdleClose();
       const m = menuRef.current;
       if (typeof m !== "object" || m.type !== "typing") return;
       const payload = e.payload;
@@ -597,7 +614,7 @@ export function OverlayApp() {
     return () => {
       un.then((fn) => fn());
     };
-  }, [commitTyping, cancelTyping]);
+  }, [commitTyping, cancelTyping, armIdleClose]);
 
   // Digit dispatch shared by the overlay-key hotkey listener and mouse clicks.
   const selectDigit = useCallback(
@@ -792,12 +809,13 @@ export function OverlayApp() {
 
   useEffect(() => {
     const un = listen<number>("overlay-key", (e) => {
+      armIdleClose();
       selectDigit(e.payload);
     });
     return () => {
       un.then((fn) => fn());
     };
-  }, [selectDigit]);
+  }, [selectDigit, armIdleClose]);
 
   useEffect(() => {
     return () => {

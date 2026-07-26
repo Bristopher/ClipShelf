@@ -164,6 +164,55 @@ fn guard_foreground(prev: isize) {
     });
 }
 
+/// True when the foreground app is running D3D EXCLUSIVE fullscreen. DWM
+/// composition is bypassed there, so our always-on-top window can NOT render
+/// above the game — opening the overlay anyway arms the temp keys and menus
+/// completely invisibly (the "keyboard hostage" failure where blind digit
+/// presses walk the menus and type mode swallows gameplay input).
+fn exclusive_fullscreen_active() -> bool {
+    use windows::Win32::UI::Shell::{
+        SHQueryUserNotificationState, QUNS_RUNNING_D3D_FULL_SCREEN,
+    };
+    unsafe {
+        SHQueryUserNotificationState()
+            .map(|s| s == QUNS_RUNNING_D3D_FULL_SCREEN)
+            .unwrap_or(false)
+    }
+}
+
+/// Center of the current foreground window (physical px) — the overlay should
+/// open on the GAME's monitor, not wherever the mouse cursor happens to sit.
+fn foreground_center() -> Option<(f64, f64)> {
+    use windows_sys::Win32::Foundation::RECT;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowRect};
+    unsafe {
+        let fg = GetForegroundWindow();
+        if fg.is_null() {
+            return None;
+        }
+        let mut r: RECT = std::mem::zeroed();
+        if GetWindowRect(fg, &mut r) == 0 {
+            return None;
+        }
+        Some((
+            ((r.left + r.right) / 2) as f64,
+            ((r.top + r.bottom) / 2) as f64,
+        ))
+    }
+}
+
+/// Reject absurdly long overlay text. Guard against blind/stuck-key typing —
+/// an invisible-overlay session once committed a 500-char keyboard mash as a
+/// remembered game name.
+fn validate_len(text: &str, max: usize, what: &str) -> Result<(), String> {
+    let n = text.chars().count();
+    if n > max {
+        Err(format!("{what} too long ({n} chars, max {max})"))
+    } else {
+        Ok(())
+    }
+}
+
 /// Hide the overlay. Emits `overlay-visible` `{visible: false}` app-wide and
 /// clears any explicit acting target — the next overlay open goes back to
 /// the most recent clip default.
@@ -171,6 +220,10 @@ pub fn hide(app: &AppHandle) {
     if let Some(window) = app.get_webview_window(LABEL) {
         let _ = window.hide();
     }
+    // Defense in depth: no hidden overlay may ever leave the LL keyboard
+    // hook armed, no matter which path hid the window (close() also stops
+    // it, but hide() can be reached directly).
+    crate::keyhook::stop();
     if let Some(state) = app.try_state::<AppState>() {
         if let Ok(mut s) = state.lock() {
             s.overlay_target = None;
@@ -183,10 +236,14 @@ pub fn hide(app: &AppHandle) {
 /// monitor currently under the cursor (falls back to the window's current
 /// monitor, then the primary monitor).
 fn target_position(window: &tauri::WebviewWindow) -> Option<(i32, i32)> {
-    let monitor = window
-        .cursor_position()
-        .ok()
-        .and_then(|pos| window.monitor_from_point(pos.x, pos.y).ok().flatten())
+    let monitor = foreground_center()
+        .and_then(|(x, y)| window.monitor_from_point(x, y).ok().flatten())
+        .or_else(|| {
+            window
+                .cursor_position()
+                .ok()
+                .and_then(|pos| window.monitor_from_point(pos.x, pos.y).ok().flatten())
+        })
         .or_else(|| window.current_monitor().ok().flatten())
         .or_else(|| window.primary_monitor().ok().flatten())?;
 
@@ -209,6 +266,21 @@ pub fn open(app: &AppHandle, controller: &HotkeyController, state: &AppState) {
     // register overlay-only binds against a window that can't handle them.
     if app.get_webview_window(LABEL).is_none() {
         log::warn!("overlay: open called but window is missing — skipping");
+        return;
+    }
+
+    // Exclusive-fullscreen guard — see `exclusive_fullscreen_active`. Never
+    // open a menu the user cannot see: log why instead.
+    if exclusive_fullscreen_active() {
+        log::warn!("overlay: refusing to open over an exclusive-fullscreen game");
+        if let Ok(mut s) = state.lock() {
+            let entry = s.logger.log(
+                LogLevel::Warning,
+                "Overlay not shown: the focused game runs EXCLUSIVE fullscreen, where the overlay can't render. Switch the game to borderless/windowed fullscreen to use it.".to_string(),
+                LogCategory::System,
+            );
+            let _ = app.emit("log-entry", &entry);
+        }
         return;
     }
 
@@ -648,6 +720,7 @@ pub async fn overlay_label(
     if label.is_empty() {
         return Err("Label cannot be empty".to_string());
     }
+    validate_len(&label, 80, "Label")?;
     let st = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || do_overlay_label(&app, &st, &label))
         .await
@@ -752,6 +825,7 @@ pub async fn overlay_describe(
     if text.is_empty() {
         return Err("Description cannot be empty".to_string());
     }
+    validate_len(&text, 300, "Description")?;
     let (acting, game, write_props, config_path, entry) = {
         let mut s = state.lock().map_err(|e| e.to_string())?;
         let acting = acting_clip(&mut s)?;
@@ -806,6 +880,7 @@ pub async fn overlay_set_game(
     game: String,
     remember: bool,
 ) -> Result<(), String> {
+    validate_len(game.trim(), 80, "Game name")?;
     let (path, exe) = {
         let mut s = state.lock().map_err(|e| e.to_string())?;
         let acting = acting_clip(&mut s)?;
@@ -907,6 +982,15 @@ fn write_prop_resolving(
 mod tests {
     use super::*;
     use crate::events::HistoryEntryPayload;
+
+    #[test]
+    fn test_validate_len() {
+        assert!(validate_len("Rainbow Six", 80, "Game name").is_ok());
+        assert!(validate_len(&"x".repeat(80), 80, "Game name").is_ok());
+        let err = validate_len(&"x".repeat(81), 80, "Game name").unwrap_err();
+        assert!(err.contains("too long"), "got: {err}");
+        assert!(err.contains("81"), "got: {err}");
+    }
 
     fn payload(
         ts: &str,
