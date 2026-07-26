@@ -94,7 +94,7 @@ fn apply_noactivate(window: &tauri::WebviewWindow) {
 /// Show the overlay positioned at the bottom-center of the monitor
 /// containing the cursor, without taking focus. Emits `overlay-visible`
 /// `{visible: true}` app-wide once shown.
-pub fn show(app: &AppHandle) {
+pub fn show(app: &AppHandle, prefer_secondary: bool) {
     let Some(window) = app.get_webview_window(LABEL) else {
         log::error!("overlay: show called before window was created");
         return;
@@ -105,7 +105,14 @@ pub fn show(app: &AppHandle) {
     // drifted a few pixels) after hide/show cycles until a resize lands.
     let _ = window.set_size(tauri::LogicalSize::new(WIDTH, HEIGHT));
 
-    if let Some((x, y)) = target_position(&window) {
+    // `prefer_secondary` = the game's monitor can't composite the overlay
+    // (exclusive fullscreen) — put it on another monitor instead.
+    let monitor_override = if prefer_secondary {
+        secondary_monitor(&window)
+    } else {
+        None
+    };
+    if let Some((x, y)) = target_position(&window, monitor_override) {
         let _ = window.set_position(PhysicalPosition::new(x, y));
     }
 
@@ -201,6 +208,24 @@ fn foreground_center() -> Option<(f64, f64)> {
     }
 }
 
+/// Monitor containing the foreground (game) window, if resolvable.
+fn foreground_monitor(window: &tauri::WebviewWindow) -> Option<tauri::Monitor> {
+    foreground_center().and_then(|(x, y)| window.monitor_from_point(x, y).ok().flatten())
+}
+
+/// A monitor OTHER than the one the foreground (game) window occupies.
+/// Exclusive fullscreen only takes over its own monitor — every other
+/// monitor still composites through DWM, so the overlay renders fine there.
+/// `None` on single-monitor setups (or when there's no other monitor).
+fn secondary_monitor(window: &tauri::WebviewWindow) -> Option<tauri::Monitor> {
+    let fg_pos = foreground_monitor(window).map(|m| *m.position());
+    window
+        .available_monitors()
+        .ok()?
+        .into_iter()
+        .find(|m| Some(*m.position()) != fg_pos)
+}
+
 /// Reject absurdly long overlay text. Guard against blind/stuck-key typing —
 /// an invisible-overlay session once committed a 500-char keyboard mash as a
 /// remembered game name.
@@ -235,9 +260,12 @@ pub fn hide(app: &AppHandle) {
 /// Compute the bottom-center physical-pixel position for the overlay on the
 /// monitor currently under the cursor (falls back to the window's current
 /// monitor, then the primary monitor).
-fn target_position(window: &tauri::WebviewWindow) -> Option<(i32, i32)> {
-    let monitor = foreground_center()
-        .and_then(|(x, y)| window.monitor_from_point(x, y).ok().flatten())
+fn target_position(
+    window: &tauri::WebviewWindow,
+    monitor_override: Option<tauri::Monitor>,
+) -> Option<(i32, i32)> {
+    let monitor = monitor_override
+        .or_else(|| foreground_monitor(window))
         .or_else(|| {
             window
                 .cursor_position()
@@ -269,22 +297,33 @@ pub fn open(app: &AppHandle, controller: &HotkeyController, state: &AppState) {
         return;
     }
 
-    // Exclusive-fullscreen guard — see `exclusive_fullscreen_active`. Never
-    // open a menu the user cannot see: log why instead.
-    if exclusive_fullscreen_active() {
-        log::warn!("overlay: refusing to open over an exclusive-fullscreen game");
-        if let Ok(mut s) = state.lock() {
-            let entry = s.logger.log(
-                LogLevel::Warning,
-                "Overlay not shown: the focused game runs EXCLUSIVE fullscreen, where the overlay can't render. Switch the game to borderless/windowed fullscreen to use it.".to_string(),
-                LogCategory::System,
-            );
-            let _ = app.emit("log-entry", &entry);
+    // Exclusive-fullscreen guard — see `exclusive_fullscreen_active`. The
+    // game's monitor can't composite the overlay, but any OTHER monitor
+    // still can: fall back to a secondary monitor when one exists. Only a
+    // single-monitor setup has nowhere visible left — never open a menu the
+    // user cannot see; log why instead.
+    let exclusive = exclusive_fullscreen_active();
+    if exclusive {
+        let has_secondary = app
+            .get_webview_window(LABEL)
+            .and_then(|w| secondary_monitor(&w))
+            .is_some();
+        if !has_secondary {
+            log::warn!("overlay: refusing to open over an exclusive-fullscreen game (no second monitor)");
+            if let Ok(mut s) = state.lock() {
+                let entry = s.logger.log(
+                    LogLevel::Warning,
+                    "Overlay not shown: the focused game runs EXCLUSIVE fullscreen, where the overlay can't render, and there's no second monitor to show it on. Switch the game to borderless/windowed fullscreen to use it.".to_string(),
+                    LogCategory::System,
+                );
+                let _ = app.emit("log-entry", &entry);
+            }
+            return;
         }
-        return;
+        log::info!("overlay: exclusive fullscreen — showing on secondary monitor");
     }
 
-    show(app);
+    show(app, exclusive);
 
     let (filename, game, wasd) = {
         let s = state.lock().unwrap();

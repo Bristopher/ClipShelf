@@ -679,9 +679,10 @@ there), gameplay digit presses blindly walked Game → Edit, the LL typing
 hook then swallowed all input, and Enter committed a 500-char keyboard
 mash as a REMEMBERED game name. Five independent guards added:
 
-1. `open()` refuses to open over exclusive fullscreen
-   (`SHQueryUserNotificationState` == QUNS_RUNNING_D3D_FULL_SCREEN) and
-   logs why; borderless/windowed games unaffected.
+1. `open()` detects exclusive fullscreen
+   (`SHQueryUserNotificationState` == QUNS_RUNNING_D3D_FULL_SCREEN). With a
+   second monitor the overlay opens THERE (other monitors still composite);
+   single-monitor setups refuse + log. Borderless/windowed unaffected.
 2. keyhook watchdog thread: force-releases type mode (~750ms) if the
    overlay window isn't visible while the hook is armed, or after 90s of
    silence; logs "Typing mode force-released".
@@ -695,8 +696,12 @@ Also: overlay now opens on the FOREGROUND window's monitor (was: monitor
 under the mouse cursor — a cursor parked on another screen made the
 overlay open out of sight). Human items:
 
-- [ ] R6 (or any game) in EXCLUSIVE fullscreen: Shift+F1 does NOT open the
-      overlay; event log explains; game input completely unaffected
+- [ ] R6 (or any game) in EXCLUSIVE fullscreen with a second monitor:
+      Shift+F1 opens the overlay ON THE OTHER MONITOR, fully usable
+      (digits/arrows/typing) while the game keeps focus
+- [ ] Exclusive fullscreen on a single-monitor setup (or others unplugged):
+      Shift+F1 does NOT open the overlay; event log explains; game input
+      completely unaffected
 - [ ] Same game in borderless: overlay opens and works as before
 - [ ] Two monitors, cursor on the other screen: Shift+F1 opens the overlay
       on the GAME's monitor
