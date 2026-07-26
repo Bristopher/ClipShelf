@@ -61,18 +61,45 @@ pub fn write_with_retry_resolving(
     loop {
         let path = get_path()
             .ok_or_else(|| "clip path no longer resolvable — skipped property write".to_string())?;
+        // A failed WRITE can be as transient as a failed probe: the probe can
+        // win the race before the recorder even opens the file, and the
+        // property handler then sees a half-written MP4 ("The data is
+        // invalid", 0x8007000D). Those retry on the same cadence; genuinely
+        // permanent errors bail immediately.
+        let mut write_err: Option<String> = None;
         if probe_exclusive(&path) {
-            return write_properties(&path, values);
+            match write_properties(&path, values) {
+                Ok(()) => return Ok(()),
+                Err(e) => {
+                    if !is_transient_prop_error(&e) {
+                        return Err(e);
+                    }
+                    write_err = Some(e);
+                }
+            }
         }
         attempt += 1;
         if attempt >= attempts {
-            return Err(format!(
-                "file still locked after {} attempts — skipped property write (history.jsonl has the data)",
-                attempts
-            ));
+            return Err(match write_err {
+                Some(e) => format!(
+                    "{e} — gave up after {attempts} attempts (history.jsonl has the data)"
+                ),
+                None => format!(
+                    "file still locked after {attempts} attempts — skipped property write (history.jsonl has the data)"
+                ),
+            });
         }
         std::thread::sleep(delay);
     }
+}
+
+/// Property-store failures worth retrying: the file exists and is probeable
+/// but its container isn't parseable yet (recorder still finalizing the MP4)
+/// or a reader briefly holds it. Everything else is treated as permanent.
+pub(crate) fn is_transient_prop_error(msg: &str) -> bool {
+    msg.contains("0x8007000D") // ERROR_INVALID_DATA — moov atom not written yet
+        || msg.contains("0x80070020") // ERROR_SHARING_VIOLATION
+        || msg.contains("0x800700AA") // ERROR_BUSY
 }
 
 /// Build a plain `VT_LPWSTR` PROPVARIANT from a single string (System.Comment).
@@ -200,6 +227,21 @@ fn write_properties(path: &Path, values: &[PropValue]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_is_transient_prop_error() {
+        // The exact message shape write_properties produces.
+        assert!(is_transient_prop_error(
+            "open property store: The data is invalid. (0x8007000D)"
+        ));
+        assert!(is_transient_prop_error(
+            "open property store: The process cannot access the file because it is being used by another process. (0x80070020)"
+        ));
+        assert!(!is_transient_prop_error(
+            "open property store: Access is denied. (0x80070005)"
+        ));
+        assert!(!is_transient_prop_error("resolve System.Rating: not found"));
+    }
 
     #[test]
     fn test_stars_to_system_rating_explorer_scale() {
