@@ -19,7 +19,8 @@
         "alwaysOnTop": true,
         "decorations": false,
         "visible": false,
-        "backgroundColor": "#000000"
+        "backgroundColor": "#000000",
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,CalculateNativeWinOcclusion"
       }
     ],
     "security": {
