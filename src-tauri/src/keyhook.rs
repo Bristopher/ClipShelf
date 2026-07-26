@@ -250,10 +250,13 @@ fn hook_thread_main(ack: std::sync::mpsc::Sender<bool>) {
 
 /// Emit an `overlay-type` payload to the frontend. Lock-free, non-blocking;
 /// errors are dropped (the proc must never block on a slow/absent frontend).
+/// Targeted at the overlay window ONLY — a broadcast `emit` serializes and
+/// evaluates the event into every webview (main/settings/tray/first-run) on
+/// every keystroke, which is measurable typing latency for zero benefit.
 #[inline]
 fn emit(payload: serde_json::Value) {
     if let Some(app) = APP.get() {
-        let _ = app.emit("overlay-type", payload);
+        let _ = app.emit_to(crate::overlay::LABEL, "overlay-type", payload);
     }
 }
 

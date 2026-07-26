@@ -591,20 +591,50 @@ export function OverlayApp() {
     [runAction],
   );
 
+  // Coalesce per-keystroke buffer updates to one React state flush per
+  // animation frame. Fast typing (or key repeat) can deliver several chars
+  // per frame; rendering each one individually just queues extra renders
+  // between frames and reads as input lag. `bufferRef` is always current —
+  // commit/cancel read it directly, so nothing is lost by deferring paint.
+  const typingFlushRaf = useRef<number | null>(null);
+  const scheduleTypingFlush = useCallback(() => {
+    if (typingFlushRaf.current != null) return;
+    typingFlushRaf.current = requestAnimationFrame(() => {
+      typingFlushRaf.current = null;
+      setTypingBuffer(bufferRef.current);
+    });
+  }, []);
+  useEffect(() => {
+    return () => {
+      if (typingFlushRaf.current != null)
+        cancelAnimationFrame(typingFlushRaf.current);
+    };
+  }, []);
+
+  // Throttle the dead-man rearm: clearing + recreating a 45s timeout on
+  // EVERY keystroke is pointless churn — once every few seconds is plenty.
+  const lastIdleArmRef = useRef(0);
+  const armIdleCloseThrottled = useCallback(() => {
+    const now = Date.now();
+    if (now - lastIdleArmRef.current < 3000) return;
+    lastIdleArmRef.current = now;
+    armIdleClose();
+  }, [armIdleClose]);
+
   // Feed typing-mode keystrokes from the LL keyboard hook. Registered once;
   // reads the current menu/buffer through refs so it never goes stale.
   useEffect(() => {
     const un = listen<OverlayTypeEvent>("overlay-type", (e) => {
-      armIdleClose();
+      armIdleCloseThrottled();
       const m = menuRef.current;
       if (typeof m !== "object" || m.type !== "typing") return;
       const payload = e.payload;
       if (payload.kind === "char") {
         bufferRef.current += payload.ch;
-        setTypingBuffer(bufferRef.current);
+        scheduleTypingFlush();
       } else if (payload.kind === "backspace") {
         bufferRef.current = bufferRef.current.slice(0, -1);
-        setTypingBuffer(bufferRef.current);
+        scheduleTypingFlush();
       } else if (payload.kind === "enter") {
         commitTyping(m.target, m.remember);
       } else if (payload.kind === "esc") {
@@ -614,7 +644,7 @@ export function OverlayApp() {
     return () => {
       un.then((fn) => fn());
     };
-  }, [commitTyping, cancelTyping, armIdleClose]);
+  }, [commitTyping, cancelTyping, armIdleCloseThrottled, scheduleTypingFlush]);
 
   // Digit dispatch shared by the overlay-key hotkey listener and mouse clicks.
   const selectDigit = useCallback(
