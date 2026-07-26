@@ -32,6 +32,8 @@ const HEIGHT: f64 = 480.0;
 pub fn init(app: &AppHandle) {
     let window = match WebviewWindowBuilder::new(app, LABEL, WebviewUrl::App(std::path::PathBuf::new()))
         .title("ClipShelf — Overlay")
+        // Must match every other webview's args — see lib.rs BROWSER_ARGS.
+        .additional_browser_args(crate::BROWSER_ARGS)
         .inner_size(WIDTH, HEIGHT)
         .resizable(false)
         .decorations(false)

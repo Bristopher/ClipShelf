@@ -17,6 +17,18 @@ mod stats;
 mod theme;
 mod thumbs;
 mod timer;
+
+/// Extra Chromium args for EVERY webview. All webviews share ONE WebView2
+/// browser process (same user data folder), and creating a webview whose
+/// arguments differ from the already-running browser process FAILS (the
+/// window exists but its webview never initializes — invisible overlay,
+/// dead settings button). This string must therefore stay IDENTICAL across
+/// the main window (tauri.conf.json "additionalBrowserArgs") and every
+/// `WebviewWindowBuilder` in this crate. First three disables are Tauri's
+/// defaults; CalculateNativeWinOcclusion stops Chromium from suspending
+/// rendering of covered windows (white-after-occlusion bug).
+pub const BROWSER_ARGS: &str =
+    "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,CalculateNativeWinOcclusion";
 mod tray;
 mod updater;
 mod watcher;
@@ -601,6 +613,7 @@ pub fn run() {
                 WebviewUrl::App(std::path::PathBuf::new()),
             )
             .title("ClipShelf — Settings")
+            .additional_browser_args(BROWSER_ARGS)
             .inner_size(640.0, 720.0)
             .min_inner_size(500.0, 500.0)
             .resizable(true)
@@ -616,6 +629,7 @@ pub fn run() {
                 WebviewUrl::App(std::path::PathBuf::new()),
             )
             .title("ClipShelf — Setup")
+            .additional_browser_args(BROWSER_ARGS)
             .inner_size(520.0, 560.0)
             .min_inner_size(480.0, 480.0)
             .resizable(true)

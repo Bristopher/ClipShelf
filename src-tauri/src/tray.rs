@@ -25,6 +25,8 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     // Pre-create the (hidden) menu window.
     if let Err(e) = WebviewWindowBuilder::new(app, MENU_LABEL, WebviewUrl::App(std::path::PathBuf::new()))
         .title("ClipShelf — Tray Menu")
+        // Must match every other webview's args — see lib.rs BROWSER_ARGS.
+        .additional_browser_args(crate::BROWSER_ARGS)
         .inner_size(MENU_WIDTH, MENU_HEIGHT)
         .resizable(false)
         .decorations(false)
