@@ -25,7 +25,7 @@ import {
   wipeLog,
 } from "@/lib/commands";
 import { EVENTS } from "@/lib/events";
-import { overlayViewport } from "@/lib/overlayViewport";
+import { formatClipAge, overlayViewport } from "@/lib/overlayViewport";
 import { errorMessage } from "@/lib/toast";
 import type { CountUpTick, OverlayContext, OverlayHistoryRow } from "@/types";
 
@@ -246,6 +246,27 @@ export function OverlayApp() {
   useEffect(() => {
     ctxRef.current = ctx;
   }, [ctx]);
+
+  // Scroll-wheel navigation (Settings-gated via ctx.wheelNav). Wheel deltas
+  // accumulate so trackpads don't fire a step per pixel; ~60 delta = one
+  // step, matching one mouse-wheel notch.
+  const wheelAccumRef = useRef(0);
+  const wheelStep = useCallback(
+    (e: React.WheelEvent, apply: (dir: 1 | -1) => void) => {
+      if (!ctxRef.current?.wheelNav) return;
+      wheelAccumRef.current += e.deltaY;
+      const STEP = 60;
+      while (wheelAccumRef.current >= STEP) {
+        wheelAccumRef.current -= STEP;
+        apply(1);
+      }
+      while (wheelAccumRef.current <= -STEP) {
+        wheelAccumRef.current += STEP;
+        apply(-1);
+      }
+    },
+    [],
+  );
 
   // Dead-man auto-close: if the overlay sits open with zero interaction
   // (e.g. it opened somewhere the user can't see it), close it instead of
@@ -1045,7 +1066,12 @@ export function OverlayApp() {
                 moves the selection and retargets every menu action to the
                 selected clip. */}
             {menu === "root" && historyRows.length > 0 && (
-              <div className="px-3 py-2.5 border-b border-white/10">
+              <div
+                className="px-3 py-2.5 border-b border-white/10"
+                onWheel={(e) =>
+                  wheelStep(e, (dir) => stripSeek(stripSelRef.current + dir))
+                }
+              >
                 <div className="flex items-center gap-1">
                   <span
                     className={`shrink-0 w-3 text-center text-[10px] ${
@@ -1094,7 +1120,7 @@ export function OverlayApp() {
                               isSel ? "text-white/80" : "text-white/40"
                             }`}
                           >
-                            {idx === 0 ? "latest" : row.time}
+                            {formatClipAge(row.ageMin, row.time)}
                           </div>
                         </button>
                       );
@@ -1112,7 +1138,12 @@ export function OverlayApp() {
             )}
 
             {/* Body */}
-            <div className="flex-1 overflow-y-auto px-3 py-3 space-y-1.5">
+            <div
+              className="flex-1 overflow-y-auto px-3 py-3 space-y-1.5"
+              onWheel={(e) =>
+                wheelStep(e, (dir) => selectDigit(dir === 1 ? 12 : 11))
+              }
+            >
               {flash ? (
                 <div
                   className={`px-3 py-4 text-center text-[15px] font-medium rounded-lg ${

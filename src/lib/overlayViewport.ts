@@ -10,6 +10,20 @@
  * @returns { offset, dotsAbove, dotsBelow } — new offset to scroll to,
  *          and whether ellipsis should show above/below the viewport
  */
+/**
+ * Compact "time since clip" caption for the overlay's thumbnail strip.
+ * <1m → "now", <60m → "12m ago", otherwise "1h 05m". Null (unparseable
+ * timestamp) falls back to the provided clock string.
+ */
+export function formatClipAge(ageMin: number | null, fallback: string): string {
+  if (ageMin === null || ageMin < 0) return fallback;
+  if (ageMin < 1) return "now";
+  if (ageMin < 60) return `${ageMin}m ago`;
+  const h = Math.floor(ageMin / 60);
+  const m = ageMin % 60;
+  return `${h}h ${String(m).padStart(2, "0")}m`;
+}
+
 export function overlayViewport(nRows: number, selected: number, offset: number, visible = 7) {
   if (nRows <= visible) return { offset: 0, dotsAbove: false, dotsBelow: false };
   let off = Math.max(0, Math.min(offset, nRows - visible));

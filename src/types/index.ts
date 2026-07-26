@@ -114,6 +114,8 @@ export interface AppConfig {
   overlay_typing_enabled: boolean;
   /** Bind W/S/A/D as arrow aliases while the overlay is open (opt-in). */
   overlay_wasd_nav: boolean;
+  /** Scroll wheel navigates the overlay (thumbnail strip + row highlight). */
+  overlay_wheel_nav: boolean;
   label_presets: string[];
   description_presets: string[];
 }
@@ -151,6 +153,8 @@ export interface OverlayContext {
   labelPresets: string[];
   descriptionPresets: string[];
   typingEnabled: boolean;
+  /** Scroll-wheel navigation enabled (Settings toggle). */
+  wheelNav: boolean;
   binds: OverlayBinds;
   fromHistory: boolean;
   targetTime?: string;
@@ -163,6 +167,8 @@ export interface OverlayHistoryRow {
   path: string;
   game?: string;
   time: string;
+  /** Whole minutes since the clip's latest event; null if unparseable. */
+  ageMin: number | null;
   exists: boolean;
 }
 

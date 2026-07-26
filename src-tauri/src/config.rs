@@ -54,6 +54,7 @@ fn default_overlay_enabled() -> bool { true }
 fn default_overlay_bind() -> String { "shift+F1".to_string() }
 fn default_overlay_typing_enabled() -> bool { true }
 fn default_overlay_wasd_nav() -> bool { false }
+fn default_overlay_wheel_nav() -> bool { true }
 fn default_label_presets() -> Vec<String> { vec!["clutch".to_string(), "ace".to_string(), "funny".to_string(), "fail".to_string()] }
 fn default_description_presets() -> Vec<String> { Vec::new() }
 
@@ -292,6 +293,10 @@ pub struct AppConfig {
     #[serde(default = "default_overlay_wasd_nav")]
     pub overlay_wasd_nav: bool,
 
+    /// Scroll wheel navigates the overlay (thumbnail strip + row highlight).
+    #[serde(default = "default_overlay_wheel_nav")]
+    pub overlay_wheel_nav: bool,
+
     /// One-keypress label chips in the overlay.
     #[serde(default = "default_label_presets")]
     pub label_presets: Vec<String>,
@@ -355,6 +360,7 @@ impl Default for AppConfig {
             overlay_bind: default_overlay_bind(),
             overlay_typing_enabled: default_overlay_typing_enabled(),
             overlay_wasd_nav: default_overlay_wasd_nav(),
+            overlay_wheel_nav: default_overlay_wheel_nav(),
             label_presets: default_label_presets(),
             description_presets: default_description_presets(),
         }
@@ -705,6 +711,7 @@ timer_duration_ms = 45000
         assert_eq!(cfg.overlay_bind, "shift+F1");
         assert!(cfg.overlay_typing_enabled);
         assert!(!cfg.overlay_wasd_nav);
+        assert!(cfg.overlay_wheel_nav);
         assert_eq!(cfg.label_presets, vec!["clutch", "ace", "funny", "fail"]);
         assert!(cfg.description_presets.is_empty());
     }

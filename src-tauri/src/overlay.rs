@@ -442,6 +442,8 @@ pub struct OverlayContext {
     pub label_presets: Vec<String>,
     pub description_presets: Vec<String>,
     pub typing_enabled: bool,
+    /// Scroll-wheel navigation (strip + menu highlight) — Settings toggle.
+    pub wheel_nav: bool,
     pub binds: OverlayBinds,
     /// True when the overlay is acting on an explicit target (e.g. a clip
     /// picked from history) rather than the most recent clip.
@@ -456,7 +458,7 @@ pub struct OverlayContext {
 /// `"No recent clip"` when there's nothing to act on.
 #[tauri::command]
 pub fn overlay_get_context(state: State<'_, AppState>) -> Result<OverlayContext, String> {
-    let (acting, filename, game, exe, from_history, label_presets, description_presets, typing_enabled, binds, config_path) = {
+    let (acting, filename, game, exe, from_history, label_presets, description_presets, typing_enabled, wheel_nav, binds, config_path) = {
         let mut s = state.lock().map_err(|e| e.to_string())?;
         let acting = acting_clip(&mut s)?;
         let filename = acting
@@ -486,6 +488,7 @@ pub fn overlay_get_context(state: State<'_, AppState>) -> Result<OverlayContext,
             c.label_presets.clone(),
             c.description_presets.clone(),
             c.overlay_typing_enabled,
+            c.overlay_wheel_nav,
             binds,
             s.config_path.clone(),
         )
@@ -511,6 +514,7 @@ pub fn overlay_get_context(state: State<'_, AppState>) -> Result<OverlayContext,
         label_presets,
         description_presets,
         typing_enabled,
+        wheel_nav,
         binds,
         from_history,
         target_time,
@@ -597,6 +601,9 @@ pub struct OverlayHistoryRow {
     /// The clip's latest event time, formatted "%I:%M %p" (falls back to the
     /// raw `ts` if it fails to parse).
     pub time: String,
+    /// Whole minutes elapsed between the clip's latest event and the fetch
+    /// (clamped at 0). `None` when the timestamp fails to parse.
+    pub age_min: Option<i64>,
     /// Whether the file still exists at `path` — filled by the caller
     /// (`overlay_history`) since a disk probe would make this fn impure.
     pub exists: bool,
@@ -613,6 +620,7 @@ fn history_rows(
     events: &[crate::events::HistoryEntryPayload],
     today: &str,
     cap: usize,
+    now: &chrono::DateTime<chrono::FixedOffset>,
 ) -> Vec<OverlayHistoryRow> {
     use std::collections::HashMap;
 
@@ -645,14 +653,18 @@ fn history_rows(
 
     rows.into_iter()
         .take(cap)
-        .map(|e| OverlayHistoryRow {
-            filename: e.filename.clone(),
-            path: e.path.clone(),
-            game: e.game.clone(),
-            time: chrono::DateTime::parse_from_rfc3339(&e.ts)
-                .map(|dt| dt.format("%I:%M %p").to_string())
-                .unwrap_or_else(|_| e.ts.clone()),
-            exists: false,
+        .map(|e| {
+            let parsed = chrono::DateTime::parse_from_rfc3339(&e.ts).ok();
+            OverlayHistoryRow {
+                filename: e.filename.clone(),
+                path: e.path.clone(),
+                game: e.game.clone(),
+                time: parsed
+                    .map(|dt| dt.format("%I:%M %p").to_string())
+                    .unwrap_or_else(|| e.ts.clone()),
+                age_min: parsed.map(|dt| (*now - dt).num_minutes().max(0)),
+                exists: false,
+            }
         })
         .collect()
 }
@@ -681,7 +693,8 @@ pub async fn overlay_history(state: State<'_, AppState>) -> Result<Vec<OverlayHi
         // are emitted, and history_rows discards non-today rows anyway, so
         // pass false to skip formatting payloads this reducer would throw away.
         let payloads = crate::commands::history_payloads(events, rollover_hour, false, &today);
-        let mut rows = history_rows(&payloads, &today, OVERLAY_HISTORY_CAP);
+        let now = chrono::Local::now().fixed_offset();
+        let mut rows = history_rows(&payloads, &today, OVERLAY_HISTORY_CAP, &now);
         for row in &mut rows {
             row.exists = std::path::Path::new(&row.path).exists();
         }
@@ -1022,6 +1035,11 @@ mod tests {
     use super::*;
     use crate::events::HistoryEntryPayload;
 
+    /// Fixed "now" for age assertions: 11:00 on the tests' logical day.
+    fn test_now() -> chrono::DateTime<chrono::FixedOffset> {
+        chrono::DateTime::parse_from_rfc3339("2026-07-19T11:00:00-04:00").unwrap()
+    }
+
     #[test]
     fn test_validate_len() {
         assert!(validate_len("Rainbow Six", 80, "Game name").is_ok());
@@ -1088,7 +1106,7 @@ mod tests {
             ),
         ];
 
-        let rows = history_rows(&events, "2026-07-19", 30);
+        let rows = history_rows(&events, "2026-07-19", 30, &test_now());
 
         assert_eq!(rows.len(), 2);
         // Newest first: clip A's labeled event (10:05) before clip B's (10:02).
@@ -1096,6 +1114,9 @@ mod tests {
         assert_eq!(rows[0].path, "C:/clips/a - clutch.mp4");
         assert_eq!(rows[0].game.as_deref(), Some("Valorant"));
         assert_eq!(rows[1].filename, "b.mp4");
+        // Ages relative to the fixed 11:00 "now": 10:05 → 55m, 10:02 → 58m.
+        assert_eq!(rows[0].age_min, Some(55));
+        assert_eq!(rows[1].age_min, Some(58));
     }
 
     #[test]
@@ -1123,7 +1144,7 @@ mod tests {
             ),
         ];
 
-        let rows = history_rows(&events, "2026-07-19", 30);
+        let rows = history_rows(&events, "2026-07-19", 30, &test_now());
 
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].filename, "a - clutch.mp4");
@@ -1151,7 +1172,7 @@ mod tests {
             ));
         }
 
-        let rows = history_rows(&events, "2026-07-19", 3);
+        let rows = history_rows(&events, "2026-07-19", 3, &test_now());
         assert_eq!(rows.len(), 3);
         // Newest first among today's clips.
         assert_eq!(rows[0].filename, "4.mp4");

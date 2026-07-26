@@ -926,6 +926,19 @@ export function SettingsForm({ config, onConfigChange }: SettingsFormProps) {
                 onCheckedChange={(v) => update({ overlay_wasd_nav: v })}
               />
             </div>
+            <div className="flex items-center justify-between">
+              <div className="pr-2">
+                <Label className="text-xs">Scroll-wheel navigation</Label>
+                <p className="text-[10px] text-t-muted">
+                  Mouse wheel scrolls the clip thumbnail strip and moves the
+                  menu highlight in the overlay.
+                </p>
+              </div>
+              <Switch
+                checked={config.overlay_wheel_nav}
+                onCheckedChange={(v) => update({ overlay_wheel_nav: v })}
+              />
+            </div>
             <PresetsEditor
               label="Label presets"
               placeholder="e.g. Clutch"
